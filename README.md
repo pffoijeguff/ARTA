@@ -1,5 +1,7 @@
 # ARTA Ω∞
 
+[![Documentation checks](https://github.com/pffoijeguff/ARTA/actions/workflows/docs-check.yml/badge.svg)](https://github.com/pffoijeguff/ARTA/actions/workflows/docs-check.yml)
+
 **A Persian-first, local-first AI operating layer for turning missions into verified outcomes.**
 
 ARTA is designed to sit between a user's intent and the tools that can change the world around them. It is not meant to be another chat window or an unchecked automation script. Its target workflow is:
