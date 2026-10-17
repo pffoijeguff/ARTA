@@ -76,6 +76,39 @@ This repository is not yet a security-certified product. The security document d
 - [Contributing](CONTRIBUTING.md) — how to propose and review changes.
 - [Security Reporting](SECURITY.md) — how to report a vulnerability responsibly.
 
+## First executable vertical slice
+
+The repository now includes a deliberately small Python mission kernel under `src/arta/`. It is the first runnable implementation slice, not the complete ARTA product.
+
+Implemented in this slice:
+
+- A guarded mission state machine with explicit terminal states.
+- A default-deny authority decision for unknown tools.
+- A tool gateway that only invokes explicitly registered in-process handlers.
+- Mandatory explicit approval for write-capable tools.
+- Structured in-memory audit events, including policy decisions and tool failures.
+- Evidence-presence verification against declared acceptance criteria.
+- Automated tests and GitHub Actions CI on Python 3.12 and 3.13.
+
+**Important limits:** this slice has no persistent storage, agent/model integration, filesystem or shell tools, external connectors, production UI, or real semantic verification. Evidence matching is a basic string check; it does not prove that a claim is true. Audit records are in memory and are not tamper-proof. Do not use this prototype to control consequential real-world actions.
+
+### Run locally
+
+Requires Python 3.12 or newer:
+
+```bash
+python -m venv .venv
+# Windows PowerShell:
+.\.venv\Scripts\Activate.ps1
+# macOS/Linux:
+source .venv/bin/activate
+
+python -m pip install -e ".[dev]"
+python -m pytest -q
+```
+
+The CI workflow runs compilation checks, dependency consistency checks, and the test suite. Its result should be verified in GitHub Actions after the workflow executes.
+
 ## Development direction
 
 The next engineering milestone should be a **small, testable vertical slice**, not a broad collection of unconnected features:
