@@ -127,8 +127,8 @@ class AuthorityKernel:
             return PolicyDecision(PolicyEffect.DENY, "Tool is not registered.")
         if not tool.name.strip():
             return PolicyDecision(PolicyEffect.DENY, "Tool name is empty.")
-        if tool.requires_approval and not approved:
-            return PolicyDecision(PolicyEffect.REQUIRE_APPROVAL, "Explicit approval is required.")
+        if (tool.requires_approval or not tool.read_only) and not approved:
+            return PolicyDecision(PolicyEffect.REQUIRE_APPROVAL, "Explicit approval is required for this tool.")
         return PolicyDecision(PolicyEffect.ALLOW, "Tool is registered and policy requirements are met.")
 
 
