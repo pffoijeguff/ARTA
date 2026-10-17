@@ -1,0 +1,104 @@
+# ARTA Security Model
+
+**Status:** Requirements for future implementation. These controls are not yet verified in a running ARTA application.
+
+## 1. Security objectives
+
+ARTA should preserve user control, protect credentials and private data, limit the impact of a compromised or mistaken agent, and make every consequential action reviewable.
+
+The primary security principle is **policy outside the model**. Prompt instructions may improve behavior but cannot replace deterministic authorization, sandboxing, or application-side permission checks.
+
+## 2. Assets to protect
+
+- user files, prompts, project workspaces, and generated artifacts;
+- access tokens, API keys, cookies, and provider credentials;
+- connected accounts and external-service permissions;
+- mission histories, evidence, audit events, and personal memory;
+- model/provider configuration and local inference resources;
+- tool contracts, approval records, policies, and release artifacts.
+
+## 3. Trust boundaries
+
+1. **User ↔ ARTA UI:** user intent, consent, approval, cancellation, and data-transfer disclosures.
+2. **Model ↔ orchestrator:** model output is untrusted input and must be schema-validated.
+3. **Orchestrator ↔ Authority Kernel:** every action requires an explicit policy decision.
+4. **Gateway ↔ tool adapter:** requests are typed, bounded, and logged; results are untrusted.
+5. **Workspace ↔ host operating system:** filesystem and process access must be sandboxed.
+6. **Local runtime ↔ remote provider:** data sent remotely must follow an explicit provider and privacy policy.
+7. **ARTA ↔ external service:** integration uses authorized credentials and allowed operations only.
+8. **Runtime ↔ memory store:** persisted data is scoped, reviewable, and subject to retention rules.
+9. **Evolution Lab ↔ production:** proposed changes are isolated until tests and required human reviews pass.
+
+## 4. Threat scenarios and required mitigations
+
+| Threat | Required mitigation |
+| --- | --- |
+| Prompt injection in web pages, files, messages, or tool output | Treat retrieved content as data, not instructions; preserve policy and instruction boundaries; require authorization separately. |
+| Model invents success or tool output | Require structured evidence and independent verification before SUCCEEDED. |
+| Unauthorized external or destructive action | Default-deny capability policy; approval for consequential actions; action-specific authorization records. |
+| Tool argument manipulation | Strict schema validation, allowlisted operations, output validation, and explicit target/scope checks. |
+| Path traversal or symlink escape | Canonical path validation and OS-level workspace restrictions; tests for parent traversal, symlinks, and platform-specific paths. |
+| Secret leakage through logs, memory, artifacts, or prompts | Secret redaction, minimal collection, dedicated secret storage, exclusion from version control, and controlled retention. |
+| Unbounded retry or runaway agent loop | Deadline, step, token/resource, and retry budgets; circuit breakers and clear escalation. |
+| Replay of a non-idempotent action | Idempotency keys or precondition checks; explicit recovery design; never blindly replay uncertain writes. |
+| Malicious or compromised connector | Narrow capabilities, adapter isolation, pinned dependencies where practical, mock tests, and auditable outputs. |
+| Remote-provider data exposure | Local-first routing, explicit disclosure before remote transfer, and configurable provider/data policies. |
+| Unsafe self-modification | Isolated candidate evaluation, reproducible tests, reviewable diffs, and human approval before production adoption. |
+| Memory poisoning | Provenance, scope boundaries, expiration/review, and separation of user-confirmed facts from model inferences. |
+
+This table is a starting threat model, not proof that these threats are already mitigated.
+
+## 5. Authorization policy
+
+### Default-deny
+
+An action not explicitly registered and permitted is denied. Missing policy, ambiguous target, malformed arguments, unavailable approval state, or policy evaluation failure must fail closed.
+
+### Approval classes
+
+The eventual product should classify actions according to impact. A starting policy:
+
+- **Read-only, bounded action:** may run automatically only when the user has enabled that capability and its scope is clear.
+- **External write or publication:** requires clear disclosure of target and effect, and an approval unless the user has granted a narrow, revocable policy for that exact class.
+- **Destructive, financial, identity/security, or hard-to-reverse action:** requires explicit, action-specific confirmation and stronger precondition checks.
+- **Permission escalation, policy modification, or production self-change:** never approved by an agent acting alone.
+
+An approval is not a general blanket permission. It must be bound to the action or a clearly described scope, and expire or be invalidated when material arguments change.
+
+### Approval record fields
+
+At minimum: approval ID, mission ID, proposed action, normalized target, relevant arguments, expected effect, risk summary, policy version, approver, timestamp, and expiry/scope. Secrets must not be copied into approval UI or logs.
+
+## 6. Data handling
+
+- Do not commit tokens, API keys, browser cookies, private keys, or real user data.
+- Load secrets from an appropriate secret store or protected environment configuration, never hard-coded defaults.
+- Redact known secret formats before emitting logs or storing memory.
+- Do not log full external-service response bodies by default.
+- Document what data leaves the device before using a remote model or external connector.
+- Define retention and deletion behavior for missions, evidence, logs, and memory.
+- Treat all external text and files as potentially adversarial.
+- Keep test fixtures synthetic; never use live credentials in tests.
+
+## 7. Workspace and tool isolation
+
+Before enabling arbitrary filesystem writes or process execution, implementation must include:
+- explicit workspace roots and robust canonical-path checks;
+- traversal and symlink-escape tests;
+- process, time, output-size, and resource limits;
+- a minimal environment and no ambient credentials;
+- an allowlist for executables and arguments if process execution is ever enabled;
+- a defined network egress policy;
+- cancellation and cleanup behavior for timed-out work.
+
+A workspace path check is not a substitute for an OS-level sandbox.
+
+## 8. Auditability and incident handling
+
+Audit entries should record decision and outcome metadata with correlation IDs, but avoid retaining sensitive payloads unnecessarily. Users should be able to understand what ran, which policy allowed it, whether approval was given, and what evidence supports the report.
+
+For a suspected incident: stop or revoke the affected capability, preserve minimal safe diagnostic evidence, rotate exposed credentials, identify affected missions and data, and document corrective actions. Automated agents must not silently erase audit history.
+
+## 9. Release gate
+
+Do not call a build production-ready until applicable security acceptance tests pass, security-sensitive defaults are reviewed, remote data flows are documented, and unresolved high-severity issues are explicitly handled. No security certification is claimed by this document.

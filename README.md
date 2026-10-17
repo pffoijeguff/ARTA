@@ -1,1 +1,102 @@
-# ARTA
+# ARTA Ω∞
+
+**A Persian-first, local-first AI operating layer for turning missions into verified outcomes.**
+
+ARTA is designed to sit between a user's intent and the tools that can change the world around them. It is not meant to be another chat window or an unchecked automation script. Its target workflow is:
+
+**Goal → requirements → plan → approval → agent team → tools → observation → verification → recovery → learning**
+
+Persian is a first-class interface language, with English technical terminology where it improves precision. The system is intended to be model-agnostic, local-first, transparent about its actions, and governed by explicit user authority.
+
+> **Repository status:** This repository currently contains the project foundation and engineering specifications. It does **not** yet contain a working ARTA runtime. The capabilities described below are design goals and requirements, not claims that they have already been implemented.
+
+## What ARTA is trying to solve
+
+AI systems can generate useful answers but often struggle to carry out multi-step work reliably: selecting tools, managing permissions, noticing failed actions, checking evidence, recovering safely, and reporting exactly what happened.
+
+ARTA's design goal is to coordinate those steps as a controlled mission rather than treating a model's response as proof of completion.
+
+### Design principles
+
+- **Mission-first:** organize work around a measurable outcome, not an endless conversation.
+- **Evidence before success:** a task is not marked successful merely because an agent says it is done.
+- **Default-deny authority:** tools receive only the capabilities explicitly permitted by policy.
+- **Human control:** ask for approval before consequential, external, destructive, or hard-to-reverse actions.
+- **Local-first and model-agnostic:** prefer local processing where practical; make remote-provider use explicit and configurable.
+- **Observable execution:** provide a traceable timeline of plans, decisions, tool calls, results, verification, and recovery.
+- **Safe recovery:** retry within limits, diagnose failures, and stop for human help instead of bypassing controls.
+- **User-owned memory:** keep memory scoped, reviewable, and subject to retention and deletion controls.
+- **Persian-first experience:** design for right-to-left Persian from the start while retaining precise English technical terms.
+
+## Target capability map
+
+| Component | Intended responsibility |
+| --- | --- |
+| Mission Orchestrator | Turn a request into a plan and govern its explicit state transitions. |
+| Agent Team | Coordinate planning, execution, observation, verification, recovery, and memory-curation roles. |
+| Authority Kernel | Evaluate whether an action is allowed, requires approval, or must be denied. |
+| Tool Gateway | Enforce typed tool contracts, timeouts, budgets, and auditable invocation boundaries. |
+| Workspace Jail | Constrain filesystem and process access to an explicitly granted workspace. |
+| Truth Engine | Attach evidence to claims and prevent unsupported success reports. |
+| Second Brain | Store scoped, user-governed memory and distinguish evidence from inference. |
+| Reach Layer / Registry | Manage authorized, replaceable connectors and their permissions. |
+| Evolution Lab | Evaluate proposed improvements under tests and human approval before adoption. |
+| Command Center UI | Present a premium mission view with progress, approvals, evidence, and recovery status. |
+
+These are architecture targets. See [Architecture](docs/ARCHITECTURE.md) and [Security Model](docs/SECURITY_MODEL.md) for the intended contracts and safety boundaries.
+
+## How a mission should work
+
+1. **Define the outcome.** Capture the goal, constraints, budget, deadline, and acceptance criteria.
+2. **Resolve ambiguity.** Ask only for details that materially affect safety or the result.
+3. **Plan.** Create a bounded plan with dependencies, expected outputs, and verification steps.
+4. **Authorize.** Evaluate every action against policy. Pause for approval whenever required.
+5. **Execute through the gateway.** Do not give agents unrestricted access to tools or the host environment.
+6. **Observe.** Record structured action results and relevant evidence while redacting secrets.
+7. **Verify.** Evaluate the result against acceptance criteria independently of the executor's claim.
+8. **Recover or escalate.** Use bounded recovery attempts; ask a human when safety or correctness cannot be established.
+9. **Report truthfully.** Distinguish completed, failed, blocked, and unverified work.
+10. **Learn with consent.** Propose improvements and memory updates; do not silently rewrite production behavior.
+
+## Trust and safety boundary
+
+ARTA is intended to treat all model output, external content, and tool output as potentially untrusted. Policy decisions must be enforced outside the model. High-impact actions require appropriate human approval, secrets must not be committed or casually logged, and integrations must use authorized interfaces.
+
+This repository is not yet a security-certified product. The security document defines intended controls and the [acceptance-test plan](docs/ACCEPTANCE_TESTS.md) describes how they should be checked as implementation begins.
+
+## Repository map
+
+- [Architecture](docs/ARCHITECTURE.md) — components, contracts, mission state machine, and data flow.
+- [Security Model](docs/SECURITY_MODEL.md) — trust boundaries, permissions, threat scenarios, and required controls.
+- [Acceptance Tests](docs/ACCEPTANCE_TESTS.md) — observable conditions that future implementation must satisfy.
+- [Roadmap](docs/ROADMAP.md) — staged delivery with explicit exit criteria.
+- [Architecture Decisions](docs/DECISIONS.md) — durable principles and the reasoning behind them.
+- [Contributing](CONTRIBUTING.md) — how to propose and review changes.
+- [Security Reporting](SECURITY.md) — how to report a vulnerability responsibly.
+
+## Development direction
+
+The next engineering milestone should be a **small, testable vertical slice**, not a broad collection of unconnected features:
+
+- a mission record and validated state machine;
+- a mock/read-only tool behind the Tool Gateway;
+- policy decisions and approval records;
+- evidence-backed verification;
+- structured audit events with secret redaction;
+- unit and integration tests for forbidden transitions and denied actions.
+
+Only after those invariants hold should write-capable tools, agent coordination, durable memory, and external connectors be introduced. The [roadmap](docs/ROADMAP.md) defines the proposed sequence.
+
+## فارسی
+
+**آرتا اُمگا بی‌نهایت** با هدف ساخت یک لایهٔ عملیاتی برای هوش مصنوعی طراحی می‌شود؛ سیستمی که مأموریت را از تعریف هدف تا اجرا، مشاهدهٔ نتیجه، راستی‌آزمایی، بازیابی از خطا و گزارش نهایی مدیریت کند.
+
+تفاوت موردنظر ARTA با یک چت‌بات معمولی این است که «گفتنِ انجام شد» را معادل «واقعاً انجام شدن» نمی‌گیرد. هر اقدام باید مجوز روشن، مرز اجرایی مشخص و نتیجهٔ قابل بررسی داشته باشد. در کارهای حساس، کنترل نهایی در اختیار کاربر می‌ماند.
+
+رابط فارسی و راست‌به‌چپ، پردازش محلی در صورت امکان، انتخاب‌پذیری مدل، تیم عامل‌ها، درگاه ابزار، هستهٔ مجوزدهی، حافظهٔ قابل‌کنترل و آزمایش قابلیت‌ها پیش از پذیرش، از اهداف طراحی پروژه‌اند.
+
+**وضعیت فعلی مخزن:** فعلاً مستندات پایه و مشخصات مهندسی در حال شکل‌گیری‌اند؛ هنوز برنامهٔ اجرایی ARTA در این مخزن قرار ندارد. موارد بالا چشم‌انداز و الزام طراحی هستند، نه قابلیت‌های پیاده‌سازی‌شده.
+
+## Status and contribution
+
+The project is at the specification/foundation stage. Contributions that improve precision, threat coverage, acceptance criteria, or a small independently testable implementation are especially useful. Please do not describe a feature as implemented until code and evidence support that claim.
