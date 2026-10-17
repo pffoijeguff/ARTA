@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "arta-omega-infinity"
+version = "0.1.0"
+description = "A Persian-first AI operating-layer research project with a minimal, auditable mission kernel."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "Proprietary - project owner to define" }
+authors = [{ name = "ARTA Project" }]
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+addopts = "-ra"
