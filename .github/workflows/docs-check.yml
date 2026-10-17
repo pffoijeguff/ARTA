@@ -1,0 +1,64 @@
+name: Documentation checks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  markdown:
+    name: Validate local Markdown links and whitespace
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Check local Markdown links and trailing whitespace
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          import sys
+          from urllib.parse import unquote, urlparse
+
+          root = Path(".").resolve()
+          markdown_files = sorted(
+              p for p in root.rglob("*.md")
+              if ".git" not in p.parts and ".venv" not in p.parts
+          )
+          errors = []
+          link_pattern = re.compile(r"!?\[[^\]]*\]\(([^)]+)\)")
+
+          for path in markdown_files:
+              text = path.read_text(encoding="utf-8")
+              for number, line in enumerate(text.splitlines(), 1):
+                  if line.rstrip() != line:
+                      errors.append(f"{path.relative_to(root)}:{number}: trailing whitespace")
+                  for match in link_pattern.finditer(line):
+                      target = match.group(1).strip().split(maxsplit=1)[0].strip("<>")
+                      if not target or target.startswith("#"):
+                          continue
+                      parsed = urlparse(target)
+                      if parsed.scheme or parsed.netloc:
+                          continue
+                      local_target = unquote(parsed.path)
+                      if not local_target:
+                          continue
+                      candidate = (path.parent / local_target).resolve()
+                      if not candidate.exists():
+                          errors.append(
+                              f"{path.relative_to(root)}:{number}: missing local link target {target}"
+                          )
+
+          if errors:
+              print("\n".join(errors))
+              sys.exit(1)
+          print(f"Checked {len(markdown_files)} Markdown files: local links and whitespace look good.")
+          PY
