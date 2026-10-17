@@ -10,7 +10,7 @@ ARTA is designed to sit between a user's intent and the tools that can change th
 
 Persian is a first-class interface language, with English technical terminology where it improves precision. The system is intended to be model-agnostic, local-first, transparent about its actions, and governed by explicit user authority.
 
-> **Repository status:** This repository currently contains the project foundation and engineering specifications. It does **not** yet contain a working ARTA runtime. The capabilities described below are design goals and requirements, not claims that they have already been implemented.
+> **Repository status:** The repository now includes a minimal, executable Python mission-kernel prototype alongside the project specifications. It is not the complete ARTA runtime. The broader capabilities described below remain design goals unless explicitly identified as implemented in the vertical-slice section.
 
 ## What ARTA is trying to solve
 
@@ -130,8 +130,8 @@ Only after those invariants hold should write-capable tools, agent coordination,
 
 رابط فارسی و راست‌به‌چپ، پردازش محلی در صورت امکان، انتخاب‌پذیری مدل، تیم عامل‌ها، درگاه ابزار، هستهٔ مجوزدهی، حافظهٔ قابل‌کنترل و آزمایش قابلیت‌ها پیش از پذیرش، از اهداف طراحی پروژه‌اند.
 
-**وضعیت فعلی مخزن:** فعلاً مستندات پایه و مشخصات مهندسی در حال شکل‌گیری‌اند؛ هنوز برنامهٔ اجرایی ARTA در این مخزن قرار ندارد. موارد بالا چشم‌انداز و الزام طراحی هستند، نه قابلیت‌های پیاده‌سازی‌شده.
+**وضعیت فعلی مخزن:** علاوه بر مستندات پایه، یک نمونهٔ اجرایی کوچک از هستهٔ مأموریت پایتون اضافه شده است؛ این نمونه محصول کامل ARTA نیست. سایر قابلیت‌های مطرح‌شده همچنان اهداف طراحی‌اند، مگر آن‌که صریحاً به‌عنوان پیاده‌سازی‌شده مشخص شده باشند.
 
 ## Status and contribution
 
-The project is at the specification/foundation stage. Contributions that improve precision, threat coverage, acceptance criteria, or a small independently testable implementation are especially useful. Please do not describe a feature as implemented until code and evidence support that claim.
+The project is at the specification/foundation stage with an initial executable mission-kernel slice. Contributions that improve precision, threat coverage, acceptance criteria, and independently testable implementation are especially useful. Please do not describe a feature as implemented until code and evidence support that claim.
