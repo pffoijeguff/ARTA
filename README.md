@@ -101,7 +101,7 @@ Implemented in this slice:
 - Strict JSON input/output validation, nesting and payload-size limits, and tests for malformed/circular/non-finite inputs.
 - Automated unit tests for core security invariants, SQLite integrity and revocation, restart persistence, action journaling, and end-to-end orchestration, plus GitHub Actions CI on Python 3.12 and 3.13.
 
-**Important limits:** SQLite persistence is optional; execution and tool handlers still run in-process. Recovery is deliberately conservative, not automatic resume: the mission is blocked for human review because the plan and raw tool results are not persisted. A journal entry marked started/unknown requires reconciliation before any replacement action is considered. Approval records still rely on a trusted caller to authenticate the approver; they are not digital signatures. Hash chains and SQLite triggers are tamper-evident safeguards, not protection against an attacker who can rewrite the database and recompute the chains. The database is not encrypted at rest, so protect its location and do not store secrets in mission goals, evidence summaries, or audit details. ExecutionControl does not forcibly interrupt arbitrary Python callbacks: ordinary handlers are checked before and after returning, while only context-aware handlers can observe cancellation/deadlines mid-operation by polling. There is still no agent/model integration, real filesystem or shell tool, external connector, production UI, or OS sandbox. Do not use this prototype to control consequential real-world actions.
+**Important limits:** SQLite persistence is optional and is not encrypted at rest. Recovery is deliberately conservative: uncertain actions require human review because the exact plan and raw tool results are not persisted. Hash chains are tamper-evident, not protection against an attacker who can rewrite the database and recompute them. ExecutionControl cannot forcibly interrupt arbitrary synchronous callbacks, and ToolGateway callbacks still execute in-process. The optional BubblewrapSandbox is a separate Linux process boundary for an explicit executable allowlist; it requires working user namespaces and a successful launch preflight, uses a private size-limited temporary workspace, drops the host environment, and fails closed if isolation setup fails. Its real-kernel integration test is opt-in and must be run on deployment hosts. The JWT-backed approval module verifies externally issued tokens against operator-configured public keys and scopes; it does not provide login/token issuance, automatic JWKS rotation, MFA, or session revocation. This prototype is not security-certified and should not control consequential real-world actions.
 
 ### Run locally
 
@@ -133,7 +133,7 @@ with SQLiteMissionStore("arta.sqlite3") as store:
     report = runner.run(mission, plan, verifier)
 ```
 
-Persist an approval through the trusted application boundary with `store.put_approval(approval)`; revocation is recorded with `store.revoke_approval(approval_id, actor_id=..., reason=...)`. When a plan carries an approval and a store is configured, the runner reloads the latest stored status instead of trusting a stale in-memory approval object. The store is an early persistence layer, not an identity provider or encrypted secret vault.
+Persist an approval through the trusted application boundary with `store.put_approval(approval)`; revocation is recorded with `store.revoke_approval(approval_id, actor_id=..., reason=...)`. When a plan carries an approval and a store is configured, the runner reloads the latest stored status instead of trusting a stale in-memory approval object. The store is an early persistence layer, not an identity provider or encrypted secret vault. The new JwtPrincipalAuthenticator verifies externally issued tokens against configured public keys and fixed issuer/audience claims; TrustedApprovalService enforces scopes, signs the exact action, and persists the result. No login flow or JWKS network fetch/rotation is included.
 
 ### Allowlisted workspace reads and writes
 
@@ -151,7 +151,7 @@ workspace = WorkspaceAdapter(
 workspace.register(gateway)
 ```
 
-The application must authenticate the approver and provide a trusted approval verifier. This adapter is not an OS sandbox and does not protect against every hostile same-user process or filesystem race. It intentionally has no delete, directory-listing, shell, or arbitrary-path operation.
+The application must authenticate the approver through the configured identity provider and provide a trusted approval verifier. This workspace adapter is not an OS sandbox and does not protect against every hostile same-user process or filesystem race. The separate BubblewrapSandbox can isolate explicitly configured command tasks on Linux, but it does not automatically wrap this adapter or ToolGateway callbacks. This adapter intentionally has no delete, directory-listing, shell, or arbitrary-path operation.
 
 ### Deadlines and cooperative cancellation
 
@@ -169,7 +169,7 @@ A tool can set `timeout_seconds` in its `ToolSpec`. To respond while work is in 
 
 ## Development direction
 
-The SQLite milestone now persists mission snapshots, approval lifecycle state, hash-chained audit records, and a privacy-minimizing action journal. Recent hardening makes the public mission audit timeline read-only, freezes tool capability allowlists, executes the same argument snapshot that was authorized, records action-specific approval requests and consumption, and enforces an invocation budget. Conservative restart reconciliation is now implemented, but it intentionally blocks rather than resumes a mission whose plan and raw results were not durably stored. The next security milestones are authenticated approval at a trusted API/UI boundary, process-isolated execution for stronger deadlines, and an OS-level workspace sandbox. Cooperative timeouts cannot forcibly stop arbitrary synchronous handlers. The runner remains in-process and mock-friendly; durable data does not itself make execution safe or automatically resumable. See the [roadmap](docs/ROADMAP.md).
+The SQLite milestone persists mission snapshots, approval lifecycle state, hash-chained audit records, and a privacy-minimizing action journal. Additional hardening makes audit records read-only through the public API, freezes capability allowlists, checks immutable action snapshots, and blocks replay of consumed approvals. The newest security components add JWT-backed approver validation/issuance and a separate Linux Bubblewrap process runner with a temporary, size-capped workspace and strict fail-closed preflight. The identity layer still depends on keys/scopes from an external trusted provider; the sandbox's real-host test remains opt-in. ToolGateway handlers still run in-process, and uncertain missions remain blocked instead of automatically resumed. See the [roadmap](docs/ROADMAP.md).
 
 ## فارسی
 
@@ -191,3 +191,15 @@ The project is at the specification/foundation stage with an initial executable 
 When a mission runs with `SQLiteMissionStore`, persisted approvals are consumed atomically before an approved action's handler starts. A consumed approval cannot be reused by another mission, and duplicate approval identifiers in one plan are rejected during preflight. If an attempt is interrupted after consumption, that approval remains spent and a new explicit approval is required.
 
 This control prevents persisted approval reuse within the prototype's SQLite boundary; it does not authenticate human approvers or provide an operating-system sandbox.
+
+## Trusted identity and approval issuance
+
+The prototype can validate an externally issued JWT using an operator-configured asymmetric public-key allowlist, exact issuer/audience, fixed per-key algorithms, required time claims, a bounded token lifetime, and approval scopes. A trusted service derives the approver ID from the verified subject, requires `arta:approve` and `arta:approve:<tool-name>`, HMAC-signs the exact tool arguments, caps approval lifetime, and persists the approval. The store alone does not authenticate a person. Do not accept arbitrary `approver_id` values from a model or public request body, and configure `AuthorityKernel(approval_verifier=authority.verify)` at the trusted execution boundary.
+
+This is not a login system: token issuance, OAuth/OIDC flows, remote JWKS rotation, MFA and session revocation are not implemented.
+
+## Optional Linux Bubblewrap sandbox
+
+`BubblewrapSandbox` is an optional process runner for explicitly allowlisted executables. It requires Linux, Bubblewrap and usable user namespaces; checks isolation setup before the requested task; disables host-network sharing; replaces inherited environment variables; mounts source/runtime content read-only; copies the project into a size-capped private tmpfs; removes common credential/config filenames and VCS metadata from that copy; and applies time, CPU, address-space, file-size, process-count, descriptor and output limits. It never falls back to direct host execution when preflight fails. Task writes are temporary and discarded; persisting any result requires a separate reviewed and approved write path.
+
+The default CI suite uses mocked process launches. Set `ARTA_RUN_BWRAP_INTEGRATION=1` on a suitable Linux host with Bubblewrap and working user namespaces to run the real sandbox smoke test. That test must pass on any deployment class before enabling higher-risk task execution. This is defense in depth, not security certification, and it does not automatically isolate callbacks registered directly with ToolGateway.

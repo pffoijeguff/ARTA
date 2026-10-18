@@ -88,7 +88,7 @@ No tool should receive a raw, unrestricted shell or arbitrary network access by 
 
 Filesystem and process operations must be restricted to an explicit workspace and capability set. Path normalization, symlink handling, parent-directory traversal, process limits, and environment-variable exposure require defensive tests. A string-prefix path check alone is not a sufficient sandbox.
 
-The initial vertical slice should avoid arbitrary shell execution. OS-level sandboxing or a carefully constrained execution service should be established before enabling higher-risk operations.
+The core ToolGateway still invokes trusted, registered callbacks in-process. A separate optional Linux BubblewrapSandbox now provides an argv-only execution boundary for explicitly allowlisted programs, with private temporary workspace and network/user/PID namespaces. Higher-risk operations must not rely on the in-process gateway as a sandbox; the Bubblewrap path needs a successful runtime preflight and a deployment-specific security review.
 
 ### 2.7 Evidence Store and Truth Engine
 
@@ -196,11 +196,11 @@ The current Python slice provides:
 - a read-only public audit timeline with recursively frozen event details and optional SQLite hash-chained persistence;
 - explicit plan and runtime invocation budgets, capped at 128 planned actions and 128 started tool invocations per mission.
 
-These records do not authenticate an approver, make evidence independently trustworthy, or make persistent audit chains tamper-proof. SQLite persistence is optional; the gateway still invokes registered Python callbacks inside the process and does not connect to a host shell, filesystem, browser, model, or external service. Automatic restart recovery, interruptible external adapters, an OS sandbox, and a UI remain unimplemented.
+These records do not by themselves authenticate an approver, make evidence independently trustworthy, or make persistent audit chains tamper-proof. SQLite persistence is optional, and ToolGateway callbacks still run inside the main Python process. New prototype components add JWT verification using operator-configured public keys and an optional Bubblewrap process boundary for allowlisted commands. They do not provide login/token issuance, remote JWKS discovery, production UI, a complete connector runtime, automatic restart resumption, or protection against kernel vulnerabilities and a compromised host account.
 
 ## 8. Immediate integration requirements
 
-Before adding a real connector, a trusted integration layer must authenticate the approver and persist/revoke approval records; load grants and policies from a protected source; serialize audit events to a protected store; and enforce the Authority Kernel result at the same boundary that executes the action. A tool's return value must not be treated as evidence automatically—the verifier or a separate adapter must create criterion-scoped evidence with traceable provenance.
+Before adding a real connector, a trusted integration layer must authenticate the approver through the configured token issuer, persist/revoke approval records, load grants and policies from a protected source, and enforce the Authority Kernel result at the same boundary that executes the action. JwtPrincipalAuthenticator verifies a supplied signed bearer token against fixed issuer/audience and an operator-managed key allowlist; it does not acquire tokens or discover/rotate keys. A tool's return value must not be treated as evidence automatically—the verifier or a separate adapter must create criterion-scoped evidence with traceable provenance.
 
 
 ## 9. MissionRunner: implemented orchestration slice
@@ -244,3 +244,16 @@ Context-aware tools are registered with contextual_handler(arguments, control) a
 The optional `WorkspaceAdapter` is the first controlled filesystem-write slice. It exposes only exact relative paths supplied at construction, registers a read-only tool and a non-read-only write tool, and delegates authorization/approval checks to `ToolGateway`. The adapter rejects absolute paths, traversal, backslashes, symlink components, non-regular files, invalid UTF-8, and files above the configured 64 KiB ceiling. A replacement requires the exact current SHA-256; a new file must not already exist. Writes are staged in a sibling temporary file, flushed, and atomically replaced, with before/after hashes returned for independent verification.
 
 The adapter does not expose deletion, directory enumeration, shell execution, or arbitrary paths. Path checks and atomic replacement are defense in depth, not an OS sandbox; a hostile process running as the same user may still race filesystem operations. Production use requires OS-level isolation and a separately authenticated approval boundary.
+
+
+## 13. Trusted JWT approval boundary
+
+`JwtPrincipalAuthenticator` accepts a bearer JWT only when the key ID selects an operator-configured asymmetric public key and the token's algorithm, signature, issuer, audience, required claims, expiration, issue time, and bounded lifetime validate. The `TrustedApprovalService` maps the verified subject to `approver_id`, requires both the global `arta:approve` scope and tool-specific `arta:approve:<tool-name>` scope, caps approval lifetime, signs the exact action with the runtime HMAC authority, and persists it in SQLite. The stored approval remains single-use under the lifecycle rules in the security model.
+
+This is a token-validation and issuance primitive, not an identity provider or complete login system. Operators must provision trusted public keys and map scopes correctly. There is no built-in OAuth/OIDC authorization-code flow, JWKS network client/rotation scheduler, session revocation channel, MFA policy, user database, or HTTP endpoint. A deployment must not expose direct approval constructors to models or untrusted clients, and its runtime must configure `AuthorityKernel(approval_verifier=authority.verify)`.
+
+## 14. Linux Bubblewrap execution boundary
+
+`BubblewrapSandbox` starts only a configured executable alias and passes its arguments as an argv array. The host environment is replaced with a minimal environment; execution requires user, PID, network, IPC, and UTS namespaces; only selected OS runtime directories are mounted read-only; the source workspace is read-only; and a filtered copy is made into size-capped private tmpfs before task execution. Temporary workspace writes are discarded. Common credential/config files and VCS metadata are removed from the temporary copy. A separate preflight must succeed before the requested program starts, and there is no host-execution fallback.
+
+The adapter is Linux-only and depends on Bubblewrap, user namespaces, `prlimit`, and standard runtime utilities. The unit suite uses mocked process launches; a real Bubblewrap escape/network smoke test is opt-in and must be run on the deployment kernel before enabling high-risk tasks. Do not treat this as a security certification or a defense against kernel vulnerabilities, an already-compromised same-user host process, or secrets deliberately placed in unusual files in the source workspace. Changes do not persist from the sandbox; reviewed outputs must pass back through a trusted, approval-gated adapter.

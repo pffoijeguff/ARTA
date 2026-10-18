@@ -118,7 +118,7 @@ The current runner tests additionally check:
 - a tool failure stops later actions and returns a partial-execution report;
 - duplicate action IDs are rejected before execution.
 
-The remaining acceptance rows still need implementation and/or independent evidence. In particular, durable persistence, user authentication, a true OS sandbox, cancellation of in-flight external actions, and real connector tests are not covered by these mock-based tests.
+The remaining acceptance rows still need implementation and/or independent evidence. JWT claim validation and a Bubblewrap launch boundary now have unit coverage, but the suite does not provide an identity-provider login flow or unconditional proof of sandbox containment on every deployment kernel. Cancellation acknowledgement from real external adapters and real connector tests also remain open.
 
 
 ## 11. SQLite store and durable orchestration tests
@@ -162,7 +162,7 @@ The workspace adapter suite must verify:
 - a failed atomic replacement preserves the old file and cleans temporary artifacts;
 - no delete, directory listing, shell, or arbitrary-path operation is exposed.
 
-Boundary not claimed by these tests: resistance to every same-user filesystem race or replacement by a hostile process. An OS sandbox remains a production requirement.
+Boundary not claimed by these tests: resistance to every same-user filesystem race, host-kernel vulnerability, or replacement by a hostile process. Bubblewrap is a separate optional execution component, not an automatic wrapper for WorkspaceAdapter or ToolGateway handlers; its real-kernel integration smoke test remains opt-in and must be run on supported deployments.
 
 
 ## 14. Single-use persisted approval tests
@@ -170,3 +170,26 @@ Boundary not claimed by these tests: resistance to every same-user filesystem ra
 The implementation atomically marks an approval consumed in SQLite before entering its handler. The approval lifecycle event is hash-chained, and consumption is bound to the mission and action fingerprint. Regression tests cover cross-mission reuse, database reopening, projection tampering, and duplicate identifiers during whole-plan preflight.
 
 This closes the prototype's persistence-level replay gap; it does not authenticate the human approver or provide a distributed identity service.
+
+## 15. JWT identity and trusted approval tests
+
+The identity suite must validate:
+- only an operator-configured `kid` and asymmetric key/algorithm pair can verify a token;
+- bad signatures, algorithm confusion, unknown keys, expired tokens, invalid issuer/audience, missing claims, malformed scopes, and excessive token lifetime are denied;
+- approval issuance requires both `arta:approve` and `arta:approve:<tool-name>`, denies unregistered tools, derives approver identity from the verified subject, caps the approval lifetime, and persists an HMAC-attested action;
+- authentication/authorization failures do not persist an approval or expose token contents.
+
+These tests validate token claims using generated test keys, not a live identity provider, login flow, JWKS rotation, MFA, or production session-revocation service.
+
+## 16. Bubblewrap isolation tests
+
+The sandbox suite checks:
+- no command can be selected outside the trusted executable alias map;
+- argument strings remain argv data and cannot become host-shell syntax;
+- required user/PID/network/IPC/UTS namespaces, read-only runtime/source mounts, private size-capped workspace/tmpfs, sanitized environment, and resource limits are present in the command;
+- a namespace/mount preflight happens before any requested task; failed preflight never launches it;
+- timeout kills the supervisor and there is no direct-host fallback;
+- output capture is bounded in memory and process output is truncated with an explicit flag;
+- an opt-in Linux integration run tries to mutate a host path and reach an external network endpoint while checking that the host marker and source workspace stay unchanged.
+
+The normal CI suite mocks Popen for deterministic lifecycle tests. The opt-in integration test is not counted as passed unless run on a host with Bubblewrap and working user namespaces. Kernel-exploit resistance, hostile same-user processes, and security certification are not claimed.

@@ -135,3 +135,23 @@ This file records durable design choices. A decision may be revised, but changes
 **Reason:** Per-mission replay protection alone permits a copied approval record to be replayed in a different mission. Conservative stop-and-reapprove behavior is preferable to silently reusing permission after an ambiguous attempt.
 
 **Consequences:** A crash after consumption may spend the approval even if no effect occurred; the user must approve a new attempt. This closes a persistence-level replay path, but does not authenticate `approver_id`, protect against a compromised process/database operator, or create a distributed authorization service.
+
+## ADR-0013 — Verify approver identity at the application boundary
+
+**Status:** Accepted for the prototype.
+
+**Decision:** Approval issuance must accept a bearer token, not a caller-supplied identity string. `JwtPrincipalAuthenticator` verifies signatures using an operator-provisioned asymmetric public-key ring and fixed algorithms, issuer, audience, and required claims. `TrustedApprovalService` requires global and tool-specific scopes, derives `approver_id` from the validated subject, caps approval lifetime, signs the exact action with HMAC, and stores the approval.
+
+**Reason:** A field named `approver_id` is merely a string unless the trusted boundary proves where it came from. Fixed configuration and explicit scope checks reduce token/key substitution and permission-confusion risks.
+
+**Consequences:** The feature depends on a real external identity provider and carefully maintained keys/scope mappings. It does not implement login, token issuance, remote JWKS rotation, MFA, or early token revocation. Direct construction of approval records remains unsafe outside the trusted boundary.
+
+## ADR-0014 — Fail-closed Linux Bubblewrap execution
+
+**Status:** Accepted for the prototype.
+
+**Decision:** Potentially untrusted commands may run only through a separate Linux Bubblewrap runner with a trusted executable alias map, mandatory user/PID/network/IPC/UTS namespaces, a sanitized environment, read-only source/runtime mounts, a bounded private tmpfs working copy, and CPU/memory/file/process/output/time limits. A separate preflight must establish the configured isolation before task launch. Any failure stops execution; no direct-host fallback is permitted.
+
+**Reason:** An in-process callback cannot be treated as a security sandbox, and cooperative timeouts cannot safely kill arbitrary blocking code. A separate OS-enforced boundary reduces the consequences of unsafe tool behavior.
+
+**Consequences:** The temporary workspace is non-persistent; result promotion must pass through a trusted reviewed write path. Bubblewrap and Linux namespace support are deployment prerequisites. Real-host tests and threat review remain release gates; this is not a guarantee against kernel vulnerabilities or a compromised host account.
