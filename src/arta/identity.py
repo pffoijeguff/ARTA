@@ -69,7 +69,7 @@ class JwtPrincipalAuthenticator:
         keys_by_kid: Mapping[str, tuple[str, str | bytes]],
         issuer: str,
         audience: str,
-        scope_claim: str = "scope",
+        scope_claim: str | None = "scope",
         max_token_lifetime_seconds: int = 3600,
         leeway_seconds: int = 0,
     ) -> None:
@@ -79,8 +79,8 @@ class JwtPrincipalAuthenticator:
             raise IdentityError("A fixed trusted JWT issuer is required.")
         if not isinstance(audience, str) or not audience.strip():
             raise IdentityError("A fixed ARTA JWT audience is required.")
-        if not isinstance(scope_claim, str) or not scope_claim.strip():
-            raise IdentityError("The JWT scope claim name must be explicit.")
+        if scope_claim is not None and (not isinstance(scope_claim, str) or not scope_claim.strip()):
+            raise IdentityError("The JWT scope claim name must be explicit when scopes are required.")
         if (
             isinstance(max_token_lifetime_seconds, bool)
             or not isinstance(max_token_lifetime_seconds, int)
@@ -114,7 +114,7 @@ class JwtPrincipalAuthenticator:
         self._keys_by_kid = MappingProxyType(checked)
         self._issuer = issuer.strip()
         self._audience = audience.strip()
-        self._scope_claim = scope_claim.strip()
+        self._scope_claim = scope_claim.strip() if scope_claim is not None else None
         self._max_token_lifetime_seconds = max_token_lifetime_seconds
         self._leeway_seconds = leeway_seconds
 
@@ -155,7 +155,7 @@ class JwtPrincipalAuthenticator:
                 audience=self._audience,
                 leeway=self._leeway_seconds,
                 options={
-                    "require": ["exp", "iat", "iss", "aud", "sub", self._scope_claim],
+                    "require": ["exp", "iat", "iss", "aud", "sub"] + ([self._scope_claim] if self._scope_claim else []),
                     "verify_signature": True,
                     "verify_exp": True,
                     "verify_iat": True,
@@ -174,12 +174,16 @@ class JwtPrincipalAuthenticator:
             if expires_at - issued_at > self._max_token_lifetime_seconds:
                 raise IdentityError("JWT lifetime exceeds the configured maximum.")
 
-            raw_scopes = claims.get(self._scope_claim)
-            if not isinstance(raw_scopes, str) or len(raw_scopes) > 8192:
-                raise IdentityError("JWT scope claim must be a bounded space-delimited string.")
-            scopes = frozenset(raw_scopes.split())
-            if not scopes or len(scopes) > 128 or any(len(item) > 256 for item in scopes):
-                raise IdentityError("JWT scope claim is empty or exceeds its bounds.")
+            if self._scope_claim is None:
+                # OIDC ID tokens commonly do not carry OAuth scopes; identity alone grants no tool permission.
+                scopes = frozenset()
+            else:
+                raw_scopes = claims.get(self._scope_claim)
+                if not isinstance(raw_scopes, str) or len(raw_scopes) > 8192:
+                    raise IdentityError("JWT scope claim must be a bounded space-delimited string.")
+                scopes = frozenset(raw_scopes.split())
+                if not scopes or len(scopes) > 128 or any(len(item) > 256 for item in scopes):
+                    raise IdentityError("JWT scope claim is empty or exceeds its bounds.")
             token_id = claims.get("jti")
             if token_id is not None and (
                 not isinstance(token_id, str) or not token_id.strip() or len(token_id) > 512

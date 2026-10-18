@@ -84,7 +84,7 @@ class OidcJwksAuthenticator:
         timeout_seconds: float = 3.0,
         max_token_lifetime_seconds: int = 3600,
         leeway_seconds: int = 0,
-        scope_claim: str = "scope",
+        scope_claim: str | None = "scope",
         fetcher: Callable[[str, float], bytes] | None = None,
     ) -> None:
         if jwt is None or serialization is None:
@@ -205,7 +205,7 @@ class OidcJwksAuthenticator:
             keys_by_kid=keys,
             issuer=self._issuer,
             audience=self._audience,
-            scope_claim=self._scope_claim,
+            scope_claim=None if expected_nonce is not None else self._scope_claim,
             max_token_lifetime_seconds=self._max_lifetime,
             leeway_seconds=self._leeway,
         )

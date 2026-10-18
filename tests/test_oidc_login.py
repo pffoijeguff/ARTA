@@ -39,7 +39,7 @@ def _setup():
 def _id_token(private, nonce):
     now = int(datetime.now(timezone.utc).timestamp())
     return jwt.encode({"iss": ISSUER, "aud": CLIENT_ID, "sub": "user-42",
-                       "iat": now, "exp": now + 300, "scope": "openid profile",
+                       "iat": now, "exp": now + 300,
                        "nonce": nonce, "jti": "login-test-token"},
                       private, algorithm="RS256", headers={"kid": "login-key"})
 
@@ -76,6 +76,7 @@ def test_pkce_login_builds_s256_request_and_validates_nonce():
     assert params["state"] == [start.state]
     result = client.complete_login(code="authorization-code", state=start.state)
     assert result.principal.subject == "user-42"
+    assert result.principal.scopes == frozenset()  # an ID token authenticates identity, not tool permissions
     assert result.access_token == "access-token-test"
     expected = base64.urlsafe_b64encode(hashlib.sha256(seen["code_verifier"].encode()).digest()).rstrip(b"=").decode()
     assert params["code_challenge"] == [expected]

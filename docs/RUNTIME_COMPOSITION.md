@@ -72,7 +72,10 @@ does not accept a client secret. It keeps pending transactions in process memory
 deployments with multiple workers need sticky routing or a shared, protected, TTL-bound transaction
 store. It is not an HTTP callback server, browser session manager, MFA system, logout/revocation
 service, or full product login UI. The host app must validate its own browser session/cookie policy
-and must not log access tokens or callback codes.
+and must not log access tokens or callback codes. The returned principal has an empty scope set because
+standard OIDC ID tokens establish identity and do not, by themselves, grant ARTA tool permissions.
+Do not pass the ID token as a scoped tool-access token; provision tool permissions separately through
+a trusted authorization policy or a separately verified access token.
 
 Example:
 
