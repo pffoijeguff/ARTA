@@ -90,7 +90,7 @@ Implemented in this slice:
 - A durable action journal with prepared / started / succeeded / failed / unknown transitions; tool arguments and output bodies are not stored, and actions with uncertain outcomes are surfaced rather than automatically retried.
 - Cooperative mission cancellation and monotonic deadlines, plus optional per-tool timeouts. Context-aware handlers can poll an ExecutionControl object; deadline expiry or cancellation produces a terminal mission result and preserves uncertain-action journal state.
 - Exact argument contracts and explicit target allowlists for registered tools.
-- Action-bound approvals using a stable SHA-256 fingerprint over the tool name and complete JSON arguments; approvals expire and are rejected if revoked, future-dated, expired, or reused for a changed action. Evaluation time comes from a trusted runtime-configured clock, not the incoming action request.
+- Action-bound approvals using a stable SHA-256 fingerprint over the tool name and complete JSON arguments; direct gateway calls enter an explicit pending-approval state, record requests and consumption, and reject changed-action or same-mission replay attempts. Approval expiry and revocation are checked against a trusted runtime-configured clock.
 - Structured evidence records scoped to an acceptance criterion, with PASS / FAIL / INCONCLUSIVE outcomes, source-action IDs, timestamps, and summaries.
 - Verification fails closed if required evidence is missing, the newest evidence fails or is inconclusive, or the latest observations conflict.
 - Audit events record policy outcomes, action fingerprints, and evidence metadata without recording raw tool arguments or exception messages.
@@ -147,7 +147,7 @@ A tool can set `timeout_seconds` in its `ToolSpec`. To respond while work is in 
 
 ## Development direction
 
-The SQLite milestone now persists mission snapshots, approval lifecycle state, hash-chained audit records, and a privacy-minimizing action journal. Next, the project needs safe restart/reconciliation semantics, bounded timeouts and cancellation, an OS-level workspace sandbox, and authenticated approval at a trusted API/UI boundary. The current runner remains in-process and mock-friendly; durable data does not itself make execution safe or automatically resumable. Agent/model integration, external connectors, and the Command Center UI should follow only after those trust boundaries are independently tested. See the [roadmap](docs/ROADMAP.md).
+The SQLite milestone now persists mission snapshots, approval lifecycle state, hash-chained audit records, and a privacy-minimizing action journal. Recent hardening makes the public mission audit timeline read-only, freezes tool capability allowlists, executes the same argument snapshot that was authorized, and records action-specific approval requests and consumption. The next security milestones are crash-safe restart/reconciliation, hard deadlines through process-isolated workers, an OS-level workspace sandbox, authenticated approval at a trusted API/UI boundary, and explicit action/resource budgets. Cooperative timeouts already exist, but cannot forcibly stop arbitrary synchronous handlers. The runner remains in-process and mock-friendly; durable data does not itself make execution safe or automatically resumable. Agent/model integration, external connectors, and the Command Center UI should follow only after those trust boundaries are independently tested. See the [roadmap](docs/ROADMAP.md).
 
 ## فارسی
 
