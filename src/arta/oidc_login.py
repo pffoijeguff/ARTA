@@ -146,6 +146,8 @@ class OidcAuthorizationCodeClient:
         now = time.monotonic()
         with self._lock:
             self._pending = {key: value for key, value in self._pending.items() if value.expires_at > now}
+            if len(self._pending) >= 1024:
+                raise IdentityError("Too many OIDC login transactions are pending; retry after existing transactions expire.")
             self._pending[state] = _PendingLogin(verifier, nonce, now + self._ttl)
         params = {
             "response_type": "code",
