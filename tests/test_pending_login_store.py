@@ -21,6 +21,8 @@ def test_encrypted_store_is_shared_and_consumes_state_exactly_once(tmp_path):
     reader = EncryptedSQLitePendingLoginStore(path, KEY)
     writer.put(STATE, VERIFIER, NONCE, time.time() + 60, BINDING_HASH)
 
+    # A callback from another browser must not consume the legitimate transaction.
+    assert reader.consume(STATE, browser_binding_hash="b" * 64) is None
     result = reader.consume(STATE, browser_binding_hash=BINDING_HASH)
     assert result is not None
     assert result.verifier == VERIFIER
