@@ -5,6 +5,7 @@ import sqlite3
 
 import pytest
 
+from arta.approvals import HmacApprovalAuthority
 from arta.core import (
     ApprovalStatus,
     AuthorityKernel,
@@ -27,6 +28,7 @@ from arta.runner import MissionPlan, MissionRunner, PlannedAction
 NOW = "2026-10-18T08:00:00+00:00"
 ISSUED = "2026-10-18T07:00:00+00:00"
 EXPIRES = "2026-10-18T09:00:00+00:00"
+TEST_APPROVAL_KEY = b"persistence-test-key-with-32-bytes!!"
 
 
 def completed_mission() -> Mission:
@@ -46,8 +48,8 @@ def completed_mission() -> Mission:
     return item
 
 
-def approval_for_write() :
-    return create_approval_record(
+def approval_for_write():
+    return HmacApprovalAuthority(TEST_APPROVAL_KEY).issue(
         "workspace.write",
         {"path": "reports/final.md", "content": "approved sample"},
         approver_id="trusted-test-operator",
@@ -132,12 +134,14 @@ def test_approval_records_persist_and_revocation_is_audited() -> None:
         store.put_approval(approval)
         loaded = store.get_approval(approval.approval_id)
         assert loaded == approval
+        assert HmacApprovalAuthority(TEST_APPROVAL_KEY).verify(loaded)
         revoked = store.revoke_approval(
             approval.approval_id,
             actor_id="trusted-test-operator",
             reason="User withdrew permission.",
         )
         assert revoked.status is ApprovalStatus.REVOKED
+        assert not HmacApprovalAuthority(TEST_APPROVAL_KEY).verify(revoked)
         assert store.get_approval(approval.approval_id).status is ApprovalStatus.REVOKED
         events = store._verify_chain_locked("approval_audit_events", "approval_id", approval.approval_id)
         assert len(events) == 2
