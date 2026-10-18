@@ -181,9 +181,9 @@ def test_approval_service_rejects_missing_scope_unregistered_tool_and_excessive_
         )
         no_tool_scope = make_token(private, scope="arta:approve")
         with pytest.raises(IdentityError, match="scope"):
-            service.issue_approval(no_tool_scope, "workspace.write", {"path": "report.md", "content": "x"})
+            service.issue_approval(no_tool_scope, "workspace.write", {"path": "report.md", "content": "x"}, lifetime_seconds=60)
         with pytest.raises(IdentityError, match="not configured"):
-            service.issue_approval(make_token(private), "unregistered.tool", {})
+            service.issue_approval(make_token(private), "unregistered.tool", {}, lifetime_seconds=60)
         with pytest.raises(IdentityError, match="lifetime"):
             service.issue_approval(make_token(private), "workspace.write", {}, lifetime_seconds=91)
         assert store.get_approval("not-created") is None
