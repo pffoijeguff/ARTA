@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import io
 import json
-from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
@@ -37,7 +36,7 @@ class FakeLogin:
         if state != self.start.state or browser_binding != self.start.browser_binding_cookie_value or code != "valid-code":
             raise IdentityError("bad callback")
         return OidcLoginResult(
-            principal=AuthenticatedPrincipal(subject="verified-user", scopes=frozenset()),
+            principal=AuthenticatedPrincipal(subject="verified-user", issuer="https://identity.example.test/", audience="arta-web", scopes=frozenset(), issued_at=1_700_000_000, expires_at=1_700_003_600),
             access_token="provider-access-token-that-must-not-be-returned",
         )
 
@@ -89,7 +88,7 @@ def test_login_callback_session_and_logout_flow(tmp_path):
     binding_cookie = header_values(headers, "Set-Cookie")[0]
     assert "Secure" in binding_cookie and "HttpOnly" in binding_cookie and "SameSite=Lax" in binding_cookie
 
-    status, headers, _ = invoke(
+    status, headers, callback_body = invoke(
         app,
         "/oidc/callback",
         query="code=valid-code&state=test-state-value",
@@ -102,7 +101,8 @@ def test_login_callback_session_and_logout_flow(tmp_path):
     assert any("Max-Age=0" in value and login.start.browser_binding_cookie_name in value for value in cookies)
     session_cookie = next(value for value in cookies if value.startswith("arta_session="))
     assert "Secure" in session_cookie and "HttpOnly" in session_cookie and "SameSite=Lax" in session_cookie
-    assert b"provider-access-token" not in b"".join(headers.__repr__().encode() for _ in range(1))
+    assert callback_body == b""
+    assert all("provider-access-token" not in value for _, value in headers)
 
     status, _, body = invoke(app, "/session", cookie=cookie_pair(session_cookie))
     assert status == "200 OK"
