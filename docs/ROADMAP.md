@@ -4,6 +4,10 @@
 
 The project should advance through a few meaningful milestones. Each milestone has a narrow end-to-end objective and an exit gate; breadth should follow reliability, not precede it.
 
+## Progress snapshot — 2026-10-18
+
+The initial Python kernel already exists. This hardening slice upgrades evidence from free-form substring matching to criterion-scoped PASS / FAIL / INCONCLUSIVE records, binds approvals to the exact tool-plus-arguments fingerprint, checks approval status/time bounds, and adds tool argument/target allowlists plus strict JSON boundary checks. Test coverage is expanded around these invariants. This is still an in-memory prototype; it does not close the full M1 end-to-end gateway, identity, audit persistence, sandbox, or orchestrator requirements.
+
 ## M0 — Project foundation and contracts
 
 **Goal:** Make the intended system understandable, reviewable, and testable before implementation expands.
@@ -35,8 +39,12 @@ Deliverables:
 - unknown tools are denied;
 - missing approval blocks protected operations;
 - a mission cannot report success without passing evidence;
+- tool arguments and targets are validated against explicit contracts;
+- approvals are action-bound, unexpired, and not revoked;
 - timeout, cancellation, and bounded recovery have tested outcomes;
 - a clean checkout can run the documented checks.
+
+**Current status:** Core state, tool-contract, approval-record, and evidence checks exist with local unit tests. Timeouts, cancellation propagation, durable audit storage, authenticated approvals, and a full end-to-end mission remain open, so M1 is not complete.
 
 ## M2 — Controlled state changes
 

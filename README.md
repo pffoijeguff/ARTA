@@ -85,12 +85,15 @@ Implemented in this slice:
 - A guarded mission state machine with explicit terminal states.
 - A default-deny authority decision for unknown tools.
 - A tool gateway that only invokes explicitly registered in-process handlers.
-- Mandatory explicit approval for write-capable tools.
-- Structured in-memory audit events, including policy decisions and tool failures.
-- Evidence-presence verification against declared acceptance criteria.
+- Exact argument contracts and explicit target allowlists for registered tools.
+- Action-bound approvals using a stable SHA-256 fingerprint over the tool name and complete JSON arguments; approvals expire and are rejected if revoked, future-dated, expired, or reused for a changed action.
+- Structured evidence records scoped to an acceptance criterion, with PASS / FAIL / INCONCLUSIVE outcomes, source-action IDs, timestamps, and summaries.
+- Verification fails closed if required evidence is missing, the newest evidence fails or is inconclusive, or the latest observations conflict.
+- Audit events record policy outcomes, action fingerprints, and evidence metadata without recording raw tool arguments or exception messages.
+- Strict JSON input/output validation, nesting and payload-size limits, and tests for malformed/circular/non-finite inputs.
 - Automated tests and GitHub Actions CI on Python 3.12 and 3.13.
 
-**Important limits:** this slice has no persistent storage, agent/model integration, filesystem or shell tools, external connectors, production UI, or real semantic verification. Evidence matching is a basic string check; it does not prove that a claim is true. Audit records are in memory and are not tamper-proof. Do not use this prototype to control consequential real-world actions.
+**Important limits:** this slice remains in-memory and has no persistent storage, agent/model integration, actual filesystem or shell tools, external connectors, or production UI. An evidence record is still only as trustworthy as the caller that creates it; it does not independently prove an external fact. Approval records also rely on a trusted caller to authenticate the approver—the record is not a digital signature. Audit events are not tamper-proof. Do not use this prototype to control consequential real-world actions.
 
 ### Run locally
 

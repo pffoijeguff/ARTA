@@ -1,8 +1,8 @@
 # ARTA Architecture
 
-**Status:** Proposed architecture; implementation is not yet present in this repository.
+**Status:** Hybrid: proposed system architecture plus the implemented limits of the initial Python mission-kernel slice.
 
-This document defines contracts that future code should preserve. It is not a claim that these modules already exist.
+This document defines contracts that future code should preserve. It is not a claim that all components already exist. The current executable surface is src/arta/core.py: an in-memory state machine, strict tool contracts, a pure authorization evaluator, action-bound approval records, and structured evidence gating.
 
 ## 1. System boundary
 
@@ -181,3 +181,22 @@ Telemetry is useful only if access to the telemetry itself is controlled and sen
 The first implementation should demonstrate the end-to-end contract with a mock or read-only tool. State-machine and policy tests come before broad integrations. Add write-capable tools only after denial, approval, cancellation, retry, evidence, and audit invariants are executable tests.
 
 See [Acceptance Tests](ACCEPTANCE_TESTS.md), [Security Model](SECURITY_MODEL.md), and [Roadmap](ROADMAP.md).
+
+
+## 7. What is implemented now
+
+The current Python slice provides:
+
+- a guarded eight-state mission lifecycle (CREATED, PLANNED, AWAITING_APPROVAL, RUNNING, VERIFYING, and three terminal outcomes);
+- registered in-process tool handlers with allowed/required argument fields and optional exact target allowlists;
+- default-deny handling for unknown tools, malformed JSON arguments, unexpected arguments, missing required values, and disallowed targets;
+- action fingerprints that are stable across JSON object-key order and change when arguments change;
+- approval records tied to the exact tool and arguments, with approver metadata, explicit status, timezone-aware issue time, and expiry checks;
+- criterion-scoped evidence with PASS, FAIL, or INCONCLUSIVE outcomes, source-action references, and timestamp-aware verification;
+- bounded JSON input/output checks and in-memory audit events that avoid recording raw tool payloads.
+
+These records do not authenticate an approver, make evidence independently trustworthy, or make an in-memory audit log tamper-proof. The current gateway only invokes registered Python callbacks inside the process; it does not connect to a host shell, filesystem, browser, model, or external service. Persistence, orchestrator loops, retry/cancellation coordination, an OS sandbox, and a UI remain unimplemented.
+
+## 8. Immediate integration requirements
+
+Before adding a real connector, a trusted integration layer must authenticate the approver and persist/revoke approval records; load grants and policies from a protected source; serialize audit events to a protected store; and enforce the Authority Kernel result at the same boundary that executes the action. A tool's return value must not be treated as evidence automatically—the verifier or a separate adapter must create criterion-scoped evidence with traceable provenance.

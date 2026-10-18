@@ -61,3 +61,24 @@ This file records durable design choices. A decision may be revised, but changes
 **Reason:** A system must not weaken its own safety constraints while attempting to improve itself.
 
 **Consequences:** Versioned policies, reproducible tests, and an auditable release process are required before production self-improvement workflows are enabled.
+
+
+## ADR-0007 — Structured criterion-scoped evidence
+
+**Status:** Accepted.
+
+**Decision:** Verification consumes evidence records with a criterion reference, source-action identifier, timestamp, summary, and explicit PASS / FAIL / INCONCLUSIVE outcome. The most recent observation for every required criterion must pass; conflicting latest outcomes fail closed.
+
+**Reason:** Free-form substring matching can produce false positives and cannot distinguish an observed failure from uncertainty.
+
+**Consequences:** Evidence now has a stable schema and source-action reference. Trust in its producer and independent validation of external effects remain responsibilities of a future trusted verification layer.
+
+## ADR-0008 — Action-bound approval records
+
+**Status:** Accepted.
+
+**Decision:** A protected tool action requires an approval record tied to the stable fingerprint of the exact tool name and complete JSON argument object. The record is rejected if its status is not approved, timestamps are invalid, it is future-dated/expired, or any action argument changes.
+
+**Reason:** A boolean approval flag can be accidentally reused for a different action or target.
+
+**Consequences:** The approval record is stricter but does not authenticate the approver. Only a trusted UI/API boundary may create the record after authenticating user intent; production integration must preserve that trust boundary.

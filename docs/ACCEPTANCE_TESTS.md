@@ -1,8 +1,8 @@
 # ARTA Acceptance Test Plan
 
-**Status:** Test requirements to implement alongside the runtime. This document does not claim that these tests currently exist or pass.
+**Status:** Mixed: the first rows below have matching local unit tests in tests/test_core.py; remaining requirements are not all implemented and must not be read as passing.
 
-The purpose of this plan is to make the product's most important promises observable and falsifiable. Each test should be automated where practical, deterministic, and runnable without real external accounts or live secrets.
+The purpose of this plan is to make the product's most important promises observable and falsifiable. Tests should be deterministic and runnable without real external accounts or live secrets. The current local suite covers mission-state guards, structured evidence, newest/conflicting evidence handling, strict tool argument/target contracts, action-bound approval timing/fingerprints, and safe tool-failure audit behavior.
 
 ## 1. Mission state machine
 
@@ -88,3 +88,17 @@ As implementation grows, CI should include:
 - dependency and secret scanning appropriate to the repository's stack.
 
 Test names and outcomes should map to requirement IDs above. A quality gate must not be reported as passing until it has actually run against the relevant revision.
+
+
+## 9. Newly covered unit-test cases
+
+The current Python suite covers at least these implemented contracts:
+
+- invalid mission creation and illegal/terminal state transitions;
+- structured evidence, unknown criteria, duplicate evidence IDs, naive timestamps, missing criteria, newest FAIL/INCONCLUSIVE evidence, and same-time conflict rejection;
+- unknown tool denial, allowed/required argument checking, and exact target allowlists;
+- missing approval, changed action arguments, changed target/tool, expired/future/revoked approvals, and fingerprint stability;
+- rejection of non-finite, circular, non-object, and non-JSON values;
+- safe error messages and denial of tool execution outside an active mission.
+
+This section is a map from code to test names, not a statement that the entire acceptance matrix is complete. CI results must be read from the run attached to the exact commit.
