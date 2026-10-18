@@ -163,6 +163,11 @@ class BubblewrapSandbox:
             raise SandboxError(f"{label} must be an integer between {minimum} and {maximum}.")
         return value
 
+    @property
+    def allowed_aliases(self) -> tuple[str, ...]:
+        """Return immutable executable aliases configured by the trusted runtime."""
+        return tuple(sorted(self._allowed_executables))
+
     def _resolve_system_roots(self) -> tuple[Path, ...]:
         resolved: list[Path] = []
         for raw in self._SYSTEM_ROOTS:

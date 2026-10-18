@@ -193,3 +193,14 @@ The sandbox suite checks:
 - an opt-in Linux integration run tries to mutate a host path and reach an external network endpoint while checking that the host marker and source workspace stay unchanged.
 
 The normal CI suite mocks Popen for deterministic lifecycle tests. The opt-in integration test is not counted as passed unless run on a host with Bubblewrap and working user namespaces. Kernel-exploit resistance, hostile same-user processes, and security certification are not claimed.
+
+## 17. ToolGateway sandbox bridge
+
+- registering the bridge marks the process tool non-read-only and approval-required;
+- an invocation without approval transitions to the approval-pending state and never calls the sandbox;
+- a correctly signed, action-bound approval permits the exact argument snapshot to reach the sandbox adapter;
+- an executable alias outside the configured target allowlist is denied before handler execution;
+- non-array argv and invalid timeout types are rejected by the adapter;
+- command exit status, timeout and output truncation are returned as structured fields for independent mission verification.
+
+These tests use a real BubblewrapSandbox configuration object with its `run` method replaced by a test double. They validate policy wiring only, not kernel-level isolation. The opt-in Bubblewrap integration test must be executed on the deployment host.

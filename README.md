@@ -203,3 +203,10 @@ This is not a login system: token issuance, OAuth/OIDC flows, remote JWKS rotati
 `BubblewrapSandbox` is an optional process runner for explicitly allowlisted executables. It requires Linux, Bubblewrap and usable user namespaces; checks isolation setup before the requested task; disables host-network sharing; replaces inherited environment variables; mounts source/runtime content read-only; copies the project into a size-capped private tmpfs; removes common credential/config filenames and VCS metadata from that copy; and applies time, CPU, address-space, file-size, process-count, descriptor and output limits. It never falls back to direct host execution when preflight fails. Task writes are temporary and discarded; persisting any result requires a separate reviewed and approved write path.
 
 The default CI suite uses mocked process launches. Set `ARTA_RUN_BWRAP_INTEGRATION=1` on a suitable Linux host with Bubblewrap and working user namespaces to run the real sandbox smoke test. That test must pass on any deployment class before enabling higher-risk task execution. This is defense in depth, not security certification, and it does not automatically isolate callbacks registered directly with ToolGateway.
+
+
+## Approval-gated ToolGateway integration
+
+`register_sandbox_tool(gateway, sandbox)` explicitly registers `sandbox.run` as a non-read-only, approval-required tool. Its executable target is constrained to the aliases configured on the trusted `BubblewrapSandbox`; argv must be a JSON array of strings and is never interpreted by the host shell. The adapter returns bounded stdout/stderr, exit code, timeout and truncation metadata. Command failure is reported in the structured result and must be independently evaluated against mission acceptance criteria.
+
+This is an opt-in bridge, not a global wrapper: other handlers registered directly with `ToolGateway` remain in-process. The approval verifier must be configured on the gateway's `AuthorityKernel`, and the caller must use the JWT-backed trusted approval service or another properly authenticated approval boundary. This does not replace the opt-in real-host Bubblewrap integration test.
