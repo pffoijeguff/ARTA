@@ -34,7 +34,7 @@ from .core import (
 
 
 _GENESIS_HASH = "0" * 64
-_SCHEMA_VERSION = 1
+_SCHEMA_VERSION = 2
 _MAX_EVENT_BYTES = 64 * 1024
 _MAX_SNAPSHOT_BYTES = 2 * 1024 * 1024
 _TERMINAL_ACTION_STATUSES = {"succeeded", "failed", "unknown"}
@@ -160,6 +160,7 @@ class SQLiteMissionStore:
                 approved_at TEXT NOT NULL,
                 expires_at TEXT NOT NULL,
                 status TEXT NOT NULL,
+                signature TEXT,
                 record_hash TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             )""",
@@ -221,6 +222,19 @@ class SQLiteMissionStore:
             version = self._connection.execute(
                 "SELECT value FROM store_meta WHERE key='schema_version'"
             ).fetchone()["value"]
+            if version == "1":
+                # Migration is backwards-compatible with pre-signature approval records.
+                columns = {
+                    row["name"]
+                    for row in self._connection.execute("PRAGMA table_info(approvals)").fetchall()
+                }
+                if "signature" not in columns:
+                    self._connection.execute("ALTER TABLE approvals ADD COLUMN signature TEXT")
+                self._connection.execute(
+                    "UPDATE store_meta SET value=? WHERE key='schema_version'",
+                    (str(_SCHEMA_VERSION),),
+                )
+                version = str(_SCHEMA_VERSION)
             if version != str(_SCHEMA_VERSION):
                 raise StoreError(f"Unsupported database schema version: {version}.")
             self._connection.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
@@ -519,7 +533,7 @@ class SQLiteMissionStore:
             return tuple(result)
 
     @staticmethod
-    def _approval_payload(approval: Approval) -> dict[str, str]:
+    def _approval_payload(approval: Approval) -> dict[str, Any]:
         if not isinstance(approval, Approval):
             raise StoreError("Approval must be an Approval record.")
         if not isinstance(approval.status, ApprovalStatus):
@@ -532,6 +546,13 @@ class SQLiteMissionStore:
             char not in "0123456789abcdef" for char in approval.action_fingerprint
         ):
             raise StoreError("Approval fingerprint must be a lowercase SHA-256 hex digest.")
+        signature = approval.signature
+        if signature is not None and (
+            not isinstance(signature, str)
+            or len(signature) != 64
+            or any(char not in "0123456789abcdef" for char in signature)
+        ):
+            raise StoreError("Approval signature must be a lowercase HMAC-SHA256 hex digest.")
         values = {
             "approval_id": approval.approval_id,
             "approver_id": approval.approver_id,
@@ -539,6 +560,7 @@ class SQLiteMissionStore:
             "approved_at": _safe_timestamp(approval.approved_at, "Approval issue time"),
             "expires_at": _safe_timestamp(approval.expires_at, "Approval expiry"),
             "status": approval.status.value,
+            "signature": signature,
         }
         if values["expires_at"] <= values["approved_at"]:
             raise StoreError("Approval expiry must be later than issue time.")
@@ -560,11 +582,11 @@ class SQLiteMissionStore:
                 raise StoreError("Approval id already exists.")
             self._connection.execute(
                 "INSERT INTO approvals(approval_id, approver_id, action_fingerprint, approved_at, "
-                "expires_at, status, record_hash, updated_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
+                "expires_at, status, signature, record_hash, updated_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     approval.approval_id, approval.approver_id, approval.action_fingerprint,
                     payload["approved_at"], payload["expires_at"], approval.status.value,
-                    record_hash, _now(),
+                    payload["signature"], record_hash, _now(),
                 ),
             )
             event = {
@@ -602,7 +624,7 @@ class SQLiteMissionStore:
         with self._lock:
             row = self._connection.execute(
                 "SELECT approval_id, approver_id, action_fingerprint, approved_at, expires_at, "
-                "status, record_hash FROM approvals WHERE approval_id=?",
+                "status, signature, record_hash FROM approvals WHERE approval_id=?",
                 (approval_id,),
             ).fetchone()
             if row is None:
@@ -621,6 +643,10 @@ class SQLiteMissionStore:
                 "expires_at": row["expires_at"],
                 "status": ApprovalStatus.APPROVED.value,
             }
+            # Older schema-v1 creation events predate the signature field; preserve their
+            # original hash envelope instead of rewriting an append-only event chain.
+            if "signature" in creation.get("approval", {}):
+                original["signature"] = row["signature"]
             if creation.get("kind") != "created" or creation.get("approval") != original:
                 raise StoreIntegrityError(f"Approval creation record mismatch for {approval_id}.")
             if not _is_sha256(row["record_hash"]) or not hmac.compare_digest(_digest(_canonical_json(original)), row["record_hash"]):
@@ -641,6 +667,7 @@ class SQLiteMissionStore:
                 approved_at=row["approved_at"],
                 expires_at=row["expires_at"],
                 status=ApprovalStatus(row["status"]),
+                signature=row["signature"],
             )
 
     def revoke_approval(self, approval_id: str, *, actor_id: str, reason: str) -> Approval:
