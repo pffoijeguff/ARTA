@@ -266,7 +266,6 @@ def test_cancellation_during_cooperative_tool_is_journaled_as_uncertain() -> Non
 
     gateway.register(ToolSpec(
         "cooperative.wait",
-        None,
         contextual_handler=cooperative,
         timeout_seconds=1.0,
     ))
@@ -301,7 +300,6 @@ def test_tool_specific_deadline_stops_a_cooperative_handler() -> None:
 
     gateway.register(ToolSpec(
         "cooperative.wait",
-        None,
         contextual_handler=cooperative,
         timeout_seconds=0.015,
     ))

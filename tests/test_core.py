@@ -325,3 +325,15 @@ def test_tool_is_not_executed_for_a_non_active_mission() -> None:
     with pytest.raises(MissionError, match="active mission"):
         gateway.invoke(item, "counter")
     assert calls == []
+
+
+
+def test_tool_spec_requires_exactly_one_handler() -> None:
+    with pytest.raises(MissionError, match="Exactly one"):
+        ToolSpec("missing-handler")
+    with pytest.raises(MissionError, match="Exactly one"):
+        ToolSpec(
+            "two-handlers",
+            lambda args: {"ok": True},
+            contextual_handler=lambda args, control: {"ok": True},
+        )

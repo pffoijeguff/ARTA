@@ -226,7 +226,7 @@ class Mission:
 @dataclass(frozen=True)
 class ToolSpec:
     name: str
-    handler: Callable[[Mapping[str, Any]], Mapping[str, Any]] | None
+    handler: Callable[[Mapping[str, Any]], Mapping[str, Any]] | None = None
     read_only: bool = True
     requires_approval: bool = False
     allowed_arguments: tuple[str, ...] = ()

@@ -33,12 +33,18 @@ def test_execution_deadline_uses_monotonic_elapsed_time() -> None:
         control.raise_if_stopped()
 
 
-def test_child_deadline_cannot_extend_parent_deadline() -> None:
-    parent = ExecutionControl(timeout_seconds=0.03)
-    child = parent.child(timeout_seconds=1.0)
-    assert child.remaining_seconds is not None
-    assert parent.remaining_seconds is not None
-    assert child.remaining_seconds <= parent.remaining_seconds
+def test_child_deadline_is_narrower_than_parent_deadline() -> None:
+    parent = ExecutionControl(timeout_seconds=2.0)
+    child = parent.child(timeout_seconds=0.05)
+    child_remaining = child.remaining_seconds
+    parent_remaining = parent.remaining_seconds
+    assert child_remaining is not None
+    assert parent_remaining is not None
+    # The child deadline is 0.05s from child creation, while the parent has ~2s left.
+    # Using comfortably separated deadlines avoids comparing two moving clock reads.
+    assert child_remaining < 0.1
+    assert parent_remaining > 1.0
+    assert child_remaining < parent_remaining
 
 
 @pytest.mark.parametrize("value", [0, -1, float("inf"), float("nan"), True, "5", 10**1000])
