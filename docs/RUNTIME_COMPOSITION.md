@@ -107,3 +107,30 @@ result = login.complete_login(code=callback_code, state=callback_state)
 No live identity-provider credentials are included in the repository; provider registration,
 MFA policy, production callback hosting, browser cookie controls, and deployment testing remain
 operator/application responsibilities.
+
+
+## Opaque server-side OIDC sessions and revocation
+
+The optional `SQLiteOidcSessionStore` provides server-side session primitives after the application has validated a login result. It creates cryptographically random opaque session tokens, stores only a SHA-256 digest of each token, encrypts the identity subject with AES-256-GCM, enforces a bounded TTL, and supports immediate revocation on subsequent validation checks for one token or all sessions belonging to a subject.
+
+Use a separate, operator-managed 32-byte key for this session store; do not reuse the PKCE transaction-store key or the approval HMAC key. Store keys in a secret manager and protect the SQLite directory, WAL files and backups. Key rotation invalidates sessions. The subject must come from a successfully verified `OidcLoginResult.principal`, never from a callback query parameter or client-supplied identity field.
+
+Example integration boundary:
+
+```python
+from arta import SQLiteOidcSessionStore
+
+# Run only after login.complete_login(code=..., state=...) succeeded.
+sessions = SQLiteOidcSessionStore(
+    "private/oidc-sessions.sqlite3",
+    encryption_key=load_separate_32_byte_session_key(),
+)
+session = sessions.create_session(result.principal.subject, ttl_seconds=3600)
+# Set session.token in a host-managed cookie using Secure, HttpOnly and an appropriate
+# SameSite policy; never place it in a URL or log it.
+# On each authenticated request: sessions.validate_session(cookie_token)
+# On logout: sessions.revoke_session(cookie_token)
+# On account-wide logout: sessions.revoke_all_sessions(result.principal.subject)
+```
+
+The application-provided key loader and HTTP/cookie handling above are integration placeholders, not functions supplied by ARTA. Revocation makes future store validations fail; it cannot cancel a request that already passed authentication. This store does not implement an HTTP callback route, cookie middleware, CSRF defenses, MFA, provider-side token revocation, global identity-provider logout, or UI. It also does not automatically revoke access tokens issued by the identity provider. Deployment tests must cover the actual web framework, cookie policy, proxy/TLS setup and identity-provider configuration.
