@@ -30,6 +30,19 @@ from .control import CancellationToken, ExecutionCancelled, ExecutionControl, Ex
 from .persistence import SQLiteMissionStore, StoreError
 
 
+@dataclass(frozen=True)
+class MissionRecoveryReport:
+    """A conservative post-restart reconciliation result; never implies automatic resumption."""
+
+    mission_id: str
+    previous_state: MissionState
+    state: MissionState
+    recovered: bool
+    requires_human_review: bool
+    resolved_before_start_action_ids: tuple[str, ...] = ()
+    uncertain_action_ids: tuple[str, ...] = ()
+    reason: str = ""
+
 
 @dataclass(frozen=True)
 class PlannedAction:
@@ -131,6 +144,98 @@ class MissionRunner:
         if current is None:
             raise StoreError("A plan-supplied approval is not present in the persistent approval store.")
         return current
+
+    def recover_interrupted_mission(self, mission_id: str) -> MissionRecoveryReport | None:
+        """Conservatively reconcile a persisted mission after restart.
+
+        This method never replays a tool call. A "prepared" action is known not to have
+        reached the handler because the runner records "started" before calling it. A
+        "started" action is ambiguous after process loss and becomes "unknown". Since the
+        plan and raw tool results are intentionally not persisted, any non-terminal mission
+        is blocked for human review instead of being resumed speculatively.
+        """
+        if self._store is None:
+            raise MissionError("Restart recovery requires a configured SQLiteMissionStore.")
+        if not isinstance(mission_id, str) or not mission_id.strip():
+            raise MissionError("Mission id must be a non-empty string.")
+
+        mission = self._store.load_mission(mission_id.strip())
+        if mission is None:
+            return None
+        previous_state = mission.state
+        terminal_states = {
+            MissionState.COMPLETED,
+            MissionState.BLOCKED,
+            MissionState.FAILED,
+            MissionState.CANCELLED,
+        }
+        if previous_state in terminal_states:
+            existing_uncertain = tuple(
+                row["action_id"]
+                for row in self._store.unresolved_actions(mission.mission_id)
+            )
+            return MissionRecoveryReport(
+                mission_id=mission.mission_id,
+                previous_state=previous_state,
+                state=mission.state,
+                recovered=False,
+                requires_human_review=bool(existing_uncertain),
+                uncertain_action_ids=existing_uncertain,
+                reason=(
+                    "Mission is already terminal; no state was changed. Uncertain actions, if any, "
+                    "remain available for explicit review."
+                ),
+            )
+
+        resolved_before_start: list[str] = []
+        for row in self._store.action_journal(mission.mission_id):
+            if row["status"] == "prepared":
+                self._store.record_action_event(
+                    mission.mission_id,
+                    row["action_id"],
+                    row["tool_name"],
+                    row["action_fingerprint"],
+                    "failed",
+                    error_type="ProcessInterruptedBeforeStart",
+                )
+                resolved_before_start.append(row["action_id"])
+            elif row["status"] == "started":
+                self._store.record_action_event(
+                    mission.mission_id,
+                    row["action_id"],
+                    row["tool_name"],
+                    row["action_fingerprint"],
+                    "unknown",
+                    error_type="ProcessRestartDuringAction",
+                )
+
+        unresolved = tuple(
+            row["action_id"]
+            for row in self._store.unresolved_actions(mission.mission_id)
+        )
+        reason = (
+            "Process restart detected. The stored plan and raw tool results are not sufficient "
+            "for safe automatic resumption. Reconcile any uncertain external effects, then create "
+            "a new mission or explicitly re-plan."
+        )
+        mission.record("mission.recovery_required", {
+            "previous_state": previous_state.value,
+            "resolved_before_start_action_ids": resolved_before_start,
+            "uncertain_action_ids": list(unresolved),
+            "automatic_resume": False,
+        })
+        mission.transition(MissionState.BLOCKED, reason)
+        self._checkpoint(mission)
+        return MissionRecoveryReport(
+            mission_id=mission.mission_id,
+            previous_state=previous_state,
+            state=mission.state,
+            recovered=True,
+            requires_human_review=True,
+            resolved_before_start_action_ids=tuple(resolved_before_start),
+            uncertain_action_ids=unresolved,
+            reason=reason,
+        )
 
     def _stop_report(
         self,
