@@ -57,7 +57,7 @@ def test_encrypted_store_rejects_invalid_key_and_ephemeral_database(tmp_path):
 def test_encrypted_store_persists_ciphertext_not_plaintext(tmp_path):
     path = tmp_path / "oidc-transactions.sqlite3"
     store = EncryptedSQLitePendingLoginStore(path, KEY)
-    store.put(STATE, VERIFIER, NONCE, time.time() + 60)
+    store.put(STATE, VERIFIER, NONCE, time.time() + 60, BINDING_HASH)
     with sqlite3.connect(path) as db:
         row = db.execute("SELECT ciphertext FROM pending_oidc_login WHERE state = ?", (STATE,)).fetchone()
     assert row is not None
