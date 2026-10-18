@@ -18,7 +18,7 @@ from typing import Any, Mapping
 from .core import ToolGateway, ToolSpec
 
 
-MAX_WORKSPACE_FILE_BYTES = 1024 * 1024
+MAX_WORKSPACE_FILE_BYTES = 64 * 1024
 
 
 class WorkspaceError(RuntimeError):
@@ -56,7 +56,7 @@ class WorkspaceAdapter:
         if isinstance(max_file_bytes, bool) or not isinstance(max_file_bytes, int):
             raise WorkspaceError("max_file_bytes must be a positive integer.")
         if not 1 <= max_file_bytes <= MAX_WORKSPACE_FILE_BYTES:
-            raise WorkspaceError("max_file_bytes must be between 1 byte and 1 MiB.")
+            raise WorkspaceError("max_file_bytes must be between 1 byte and 64 KiB.")
 
         raw_root = Path(root).expanduser()
         raw_root.mkdir(parents=True, exist_ok=True)

@@ -137,7 +137,7 @@ Persist an approval through the trusted application boundary with `store.put_app
 
 ### Allowlisted workspace reads and writes
 
-The optional `WorkspaceAdapter` exposes only explicitly allowlisted UTF-8 files. Reads return a SHA-256 digest; writes are approval-gated through `ToolGateway`, create new files only when absent, and replace existing files only when the caller supplies the exact prior `expected_sha256`. Writes use a sibling temporary file and atomic replacement, enforce a 1 MiB default limit, reject traversal and symlinked path components, and report before/after digests.
+The optional `WorkspaceAdapter` exposes only explicitly allowlisted UTF-8 files. Reads return a SHA-256 digest; writes are approval-gated through `ToolGateway`, create new files only when absent, and replace existing files only when the caller supplies the exact prior `expected_sha256`. Writes use a sibling temporary file and atomic replacement, enforce a 64 KiB default limit, reject traversal and symlinked path components, and report before/after digests.
 
 ```python
 from arta.core import AuthorityKernel, ToolGateway
