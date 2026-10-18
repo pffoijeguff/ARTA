@@ -25,6 +25,7 @@ from .persistence import SQLiteMissionStore, StoreError, StoreIntegrityError
 from .workspace import WorkspaceAdapter, WorkspaceError
 from .identity import AuthenticatedPrincipal, IdentityError, JwtPrincipalAuthenticator, PrincipalAuthenticator, TrustedApprovalService
 from .oidc import OidcJwksAuthenticator
+from .oidc_login import LoginStart, OidcAuthorizationCodeClient, OidcLoginResult
 from .sandbox import BubblewrapSandbox, SandboxError, SandboxResult
 from .sandbox_tool import register_sandbox_tool
 from .runtime import SecureRuntime
@@ -59,6 +60,9 @@ __all__ = [
     "JwtPrincipalAuthenticator",
     "PrincipalAuthenticator",
     "OidcJwksAuthenticator",
+    "LoginStart",
+    "OidcAuthorizationCodeClient",
+    "OidcLoginResult",
     "TrustedApprovalService",
     "BubblewrapSandbox",
     "SandboxError",
