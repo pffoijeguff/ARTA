@@ -66,6 +66,8 @@ class LoginStart:
     authorization_url: str
     state: str
     expires_in_seconds: int
+    browser_binding_cookie_name: str
+    browser_binding_cookie_value: str = field(repr=False)
 
 
 @dataclass(frozen=True)
@@ -138,9 +140,11 @@ class OidcAuthorizationCodeClient:
         challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode("ascii")).digest()).rstrip(b"=").decode("ascii")
         state = self._random_urlsafe(32)
         nonce = self._random_urlsafe(32)
+        browser_binding = self._random_urlsafe(32)
+        browser_binding_hash = hashlib.sha256(browser_binding.encode("ascii")).hexdigest()
         expires_at = time.time() + self._ttl
         try:
-            self._pending_store.put(state, verifier, nonce, expires_at)
+            self._pending_store.put(state, verifier, nonce, expires_at, browser_binding_hash)
         except Exception:
             raise IdentityError("OIDC login transaction could not be stored safely; retry later.") from None
         params = {
@@ -155,17 +159,27 @@ class OidcAuthorizationCodeClient:
         }
         parsed = urlsplit(self._authorization_endpoint)
         query = urlencode(params)
-        return LoginStart(urlunsplit((parsed.scheme, parsed.netloc, parsed.path, query, "")), state, self._ttl)
+        cookie_name = "arta_oidc_bind_" + hashlib.sha256(state.encode("ascii")).hexdigest()[:16]
+        return LoginStart(
+            urlunsplit((parsed.scheme, parsed.netloc, parsed.path, query, "")),
+            state,
+            self._ttl,
+            cookie_name,
+            browser_binding,
+        )
 
-    def complete_login(self, *, code: str, state: str) -> OidcLoginResult:
-        """Exchange a one-use callback code, verify ID-token signature/claims/nonce, and return identity."""
+    def complete_login(self, *, code: str, state: str, browser_binding: str) -> OidcLoginResult:
+        """Validate browser binding, exchange a one-use code, and verify the ID-token claims/nonce."""
         if not isinstance(state, str) or not state or len(state) > 512:
             raise IdentityError("OIDC callback state is invalid.")
         if not isinstance(code, str) or not code or len(code) > _MAX_AUTH_CODE_CHARS:
             raise IdentityError("OIDC authorization code is invalid.")
-        # The store must atomically consume before network I/O to prevent callback replay/races.
+        if not isinstance(browser_binding, str) or not browser_binding or len(browser_binding) > 512:
+            raise IdentityError("OIDC browser-binding cookie is missing or invalid.")
+        binding_hash = hashlib.sha256(browser_binding.encode("utf-8")).hexdigest()
+        # The store checks browser binding and consumes the transaction atomically before network I/O.
         try:
-            transaction = self._pending_store.consume(state)
+            transaction = self._pending_store.consume(state, browser_binding_hash=binding_hash)
         except Exception:
             raise IdentityError("OIDC login transaction could not be consumed safely.") from None
         if transaction is None:
