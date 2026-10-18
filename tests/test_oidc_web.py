@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import io
 import json
 
@@ -8,7 +9,7 @@ import pytest
 from arta.identity import AuthenticatedPrincipal, IdentityError
 from arta.oidc_login import LoginStart, OidcLoginResult
 from arta.oidc_sessions import SQLiteOidcSessionStore
-from arta.oidc_web import OidcWebApplication
+from arta.oidc_web import OidcWebApplication, create_app_from_environment
 
 
 class FakeLogin:
@@ -217,3 +218,57 @@ def test_web_adapter_rejects_callback_route_collisions_and_unsafe_paths(tmp_path
             public_origin="https://app.example.test",
             callback_path=callback_path,
         )
+
+
+
+def _oidc_environment(tmp_path, *, transaction_key=b"\x81" * 32, session_key=b"\x82" * 32):
+    return {
+        "ARTA_OIDC_JWKS_URL": "https://identity.example.test/.well-known/jwks.json",
+        "ARTA_OIDC_ISSUER": "https://identity.example.test/",
+        "ARTA_OIDC_AUDIENCE": "arta-web",
+        "ARTA_OIDC_AUTHORIZATION_ENDPOINT": "https://identity.example.test/authorize",
+        "ARTA_OIDC_TOKEN_ENDPOINT": "https://identity.example.test/token",
+        "ARTA_OIDC_CLIENT_ID": "arta-web",
+        "ARTA_OIDC_REDIRECT_URI": "https://app.example.test/oidc/callback",
+        "ARTA_OIDC_TRANSACTION_DB": str(tmp_path / "transactions.sqlite3"),
+        "ARTA_OIDC_SESSION_DB": str(tmp_path / "sessions.sqlite3"),
+        "ARTA_OIDC_TRANSACTION_KEY_B64": base64.b64encode(transaction_key).decode("ascii"),
+        "ARTA_OIDC_SESSION_KEY_B64": base64.b64encode(session_key).decode("ascii"),
+    }
+
+
+def test_environment_factory_builds_configured_app_without_network_access(tmp_path):
+    app = create_app_from_environment(_oidc_environment(tmp_path))
+    assert isinstance(app, OidcWebApplication)
+    assert (tmp_path / "transactions.sqlite3").exists()
+    assert (tmp_path / "sessions.sqlite3").exists()
+
+
+def test_environment_factory_rejects_missing_or_reused_keys(tmp_path):
+    env = _oidc_environment(tmp_path)
+    env.pop("ARTA_OIDC_AUDIENCE")
+    with pytest.raises(ValueError, match="ARTA_OIDC_AUDIENCE"):
+        create_app_from_environment(env)
+
+    env = _oidc_environment(tmp_path, transaction_key=b"\x83" * 32, session_key=b"\x83" * 32)
+    with pytest.raises(ValueError, match="must be different"):
+        create_app_from_environment(env)
+
+
+def test_environment_factory_rejects_bad_key_encoding_and_callback_uri(tmp_path):
+    env = _oidc_environment(tmp_path)
+    env["ARTA_OIDC_SESSION_KEY_B64"] = "not valid base64!"
+    with pytest.raises(ValueError, match="valid base64"):
+        create_app_from_environment(env)
+
+    env = _oidc_environment(tmp_path)
+    env["ARTA_OIDC_REDIRECT_URI"] = "http://app.example.test/oidc/callback"
+    with pytest.raises(ValueError, match="dedicated HTTPS callback"):
+        create_app_from_environment(env)
+
+
+def test_environment_factory_rejects_shared_database_path(tmp_path):
+    env = _oidc_environment(tmp_path)
+    env["ARTA_OIDC_SESSION_DB"] = env["ARTA_OIDC_TRANSACTION_DB"]
+    with pytest.raises(ValueError, match="separate files"):
+        create_app_from_environment(env)
