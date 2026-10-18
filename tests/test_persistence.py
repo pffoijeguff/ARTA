@@ -59,6 +59,40 @@ def approval_for_write():
     )
 
 
+def test_schema_v1_database_migrates_to_signed_approval_schema(tmp_path) -> None:
+    path = tmp_path / "legacy-v1.sqlite3"
+    connection = sqlite3.connect(path)
+    connection.execute("CREATE TABLE store_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+    connection.execute(
+        "INSERT INTO store_meta(key, value) VALUES('schema_version', '1')"
+    )
+    connection.execute(
+        """CREATE TABLE approvals (
+            approval_id TEXT PRIMARY KEY,
+            approver_id TEXT NOT NULL,
+            action_fingerprint TEXT NOT NULL,
+            approved_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            status TEXT NOT NULL,
+            record_hash TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )"""
+    )
+    connection.commit()
+    connection.close()
+
+    with SQLiteMissionStore(path) as store:
+        version = store._connection.execute(
+            "SELECT value FROM store_meta WHERE key='schema_version'"
+        ).fetchone()["value"]
+        columns = {
+            row["name"]
+            for row in store._connection.execute("PRAGMA table_info(approvals)").fetchall()
+        }
+        assert version == "2"
+        assert "signature" in columns
+
+
 def test_mission_and_hash_chained_audit_round_trip_across_store_reopen(tmp_path) -> None:
     path = tmp_path / "arta.sqlite3"
     item = completed_mission()
