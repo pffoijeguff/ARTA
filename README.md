@@ -199,7 +199,7 @@ This control prevents persisted approval reuse within the prototype's SQLite bou
 
 The prototype can validate an externally issued JWT using an operator-configured asymmetric public-key allowlist, exact issuer/audience, fixed per-key algorithms, required time claims, a bounded token lifetime, and approval scopes. A trusted service derives the approver ID from the verified subject, requires `arta:approve` and `arta:approve:<tool-name>`, HMAC-signs the exact tool arguments, caps approval lifetime, and persists the approval. The store alone does not authenticate a person. Do not accept arbitrary `approver_id` values from a model or public request body, and configure `AuthorityKernel(approval_verifier=authority.verify)` at the trusted execution boundary.
 
-This is not a login system: token issuance, OAuth/OIDC flows, remote JWKS rotation, MFA and session revocation are not implemented.
+The repository now includes OIDC Authorization Code + PKCE client primitives, encrypted one-use transaction storage, browser-bound callback state, an optional WSGI adapter, and opaque local-session validation/revocation. See [OIDC web adapter and deployment guide](docs/OIDC_WEB_ADAPTER.md). This is still not a complete public login product: provider registration, MFA, provider-wide logout, UI, secret-manager integration, production deployment and independent security review remain deployment/application responsibilities.
 
 ## Optional Linux Bubblewrap sandbox
 
