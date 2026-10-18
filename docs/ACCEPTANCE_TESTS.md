@@ -220,3 +220,17 @@ A passing hosted-runner job is evidence for that runner image/kernel configurati
 does not certify every Linux distribution, container host, or production deployment. Run the
 same gate on each supported deployment class before enabling execution there. This job is
 separate from the default matrix so the ordinary unit suite remains portable.
+
+
+## 12. Execution-boundary contract
+
+| ID | Scenario | Required result |
+| --- | --- | --- |
+| EXEC-01 | SecureRuntime receives a plan with a tool other than its configured sandbox tool | Plan is rejected before any handler or sandbox invocation. |
+| EXEC-02 | Untrusted extension proposes an arbitrary in-process Python callback | Extension is not registered; in-process callbacks are trusted application code only. |
+| EXEC-03 | Bubblewrap preflight fails on the target host | Execution stops; there is no direct-host fallback. |
+| EXEC-04 | A command exits nonzero or times out | The result is reported as failure/uncertain; only independent evidence may determine criterion outcome. |
+| EXEC-05 | An adapter has an ambiguous external side effect | Action is reconciled or escalated to a human; no blind retry. |
+| EXEC-06 | A new connector is proposed | Its schema, trust class, scopes, timeout/budget, cancellation, idempotency/reconciliation, and independent test plan are documented before enabling it. |
+
+The existing SecureRuntime suite has a regression test for EXEC-01 and tests for approval scope, argument tampering and replay. The real-host Bubblewrap workflow provides evidence for EXEC-03 on its configured Ubuntu 24.04 runner only. EXEC-02 remains an architectural restriction on trusted composition, not a Python sandbox guarantee; independent security review and deployment-specific validation remain open.
