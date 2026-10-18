@@ -140,6 +140,9 @@ class OidcJwksAuthenticator:
             seen_kids.add(kid)
             if not isinstance(alg, str) or alg not in _SUPPORTED_ASYMMETRIC_ALGORITHMS:
                 raise IdentityError("JWKS keys must declare a supported asymmetric algorithm.")
+            expected_kty = "RSA" if alg.startswith(("RS", "PS")) else "EC" if alg.startswith("ES") else "OKP"
+            if jwk_data.get("kty") != expected_kty:
+                raise IdentityError("JWKS key type does not match its declared signing algorithm.")
             if _PRIVATE_JWK_FIELDS.intersection(jwk_data):
                 raise IdentityError("JWKS must not expose private key material.")
             if jwk_data.get("use", "sig") != "sig":
@@ -149,6 +152,8 @@ class OidcJwksAuthenticator:
                 continue
             try:
                 parsed_key = jwt.PyJWK.from_dict(jwk_data, algorithm=alg)
+                if expected_kty == "RSA" and parsed_key.key.key_size < 2048:
+                    raise IdentityError("RSA JWKS signing keys must be at least 2048 bits.")
                 public_key = parsed_key.key.public_bytes(
                     encoding=serialization.Encoding.PEM,
                     format=serialization.PublicFormat.SubjectPublicKeyInfo,
