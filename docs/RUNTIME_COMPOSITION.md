@@ -17,7 +17,7 @@ the AuthorityKernel, the ToolGateway, the Bubblewrap adapter, and the evidence-a
 The end-to-end tests replace the sandbox runner with a test double. They validate composition,
 scope enforcement, argument binding, and replay prevention; they do **not** prove kernel-level
 isolation. The opt-in real-host Bubblewrap test remains a release gate. Token issuance, MFA,
-remote JWKS rotation, encrypted storage, and security certification are not provided. The HMAC
+remote JWKS rotation for the approval JWT key ring, and security certification are not provided. The HMAC
 key and identity configuration must be managed outside the repository and SQLite database.
 
 
@@ -68,9 +68,7 @@ refresh-token lifecycle exists.
 The application must register the exact HTTPS redirect URI with its identity provider, configure
 the authorization and token endpoints from trusted provider metadata, and configure the JWKS
 authenticator's issuer and audience to match that provider and client ID. The client intentionally
-does not accept a client secret. It keeps pending transactions in process memory, so production
-deployments with multiple workers need sticky routing or a shared, protected, TTL-bound transaction
-store. It is not an HTTP callback server, browser session manager, MFA system, logout/revocation
+does not accept a client secret. By default it keeps pending transactions in process memory, suitable only for single-process use. For a shared deployment, inject EncryptedSQLitePendingLoginStore, which encrypts the verifier and nonce with AES-256-GCM and atomically consumes state inside a SQLite write transaction. Configure the same operator-managed 32-byte key on every worker using a protected secret manager; protect the database directory, backups and WAL files, and rotate keys deliberately because rotation invalidates outstanding logins. A shared filesystem must provide SQLite's required locking semantics. The store fails closed on wrong keys, corruption, expiry, and replay. It is not an HTTP callback server, browser session manager, MFA system, logout/revocation
 service, or full product login UI. The host app must validate its own browser session/cookie policy
 and must not log access tokens or callback codes. The returned principal has an empty scope set because
 standard OIDC ID tokens establish identity and do not, by themselves, grant ARTA tool permissions.
@@ -80,7 +78,7 @@ a trusted authorization policy or a separately verified access token.
 Example:
 
 ```python
-from arta import OidcAuthorizationCodeClient, OidcJwksAuthenticator
+from arta import EncryptedSQLitePendingLoginStore, OidcAuthorizationCodeClient, OidcJwksAuthenticator
 
 verifier = OidcJwksAuthenticator(
     jwks_url="https://identity.example.com/.well-known/jwks.json",
@@ -93,8 +91,13 @@ login = OidcAuthorizationCodeClient(
     client_id="arta-web",
     redirect_uri="https://app.example.com/oidc/callback",
     authenticator=verifier,
+    pending_store=EncryptedSQLitePendingLoginStore(
+        "private/oidc-transactions.sqlite3",
+        encryption_key=load_32_byte_key_from_secret_manager(),
+    ),
 )
 start = login.begin_login()
+# load_32_byte_key_from_secret_manager() is an application-provided secret-manager adapter.
 # Redirect the browser to start.authorization_url.
 # In the registered callback, pass the received code and state to:
 result = login.complete_login(code=callback_code, state=callback_state)
