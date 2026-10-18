@@ -215,7 +215,7 @@ The MissionRunner composes the mission state machine, ToolGateway, AuthorityKern
 6. It transitions to VERIFYING and calls the explicit verifier callback for each tool result. A verifier exception or malformed result becomes INCONCLUSIVE.
 7. It can reach COMPLETED only through verify_mission, after every required criterion has newest unambiguous PASS evidence.
 
-The plan is an in-memory, single-process object. It does not persist checkpoints and cannot safely resume after process restart. Approval records must come from a trusted caller, and tool handlers remain in-process callbacks. The runner provides composition evidence for the first vertical slice, not a complete production execution platform.
+The plan is an in-memory, single-process object. It does not persist enough information to safely resume after process restart. `MissionRunner.recover_interrupted_mission(mission_id)` performs conservative reconciliation instead: a stranded `started` action is marked `unknown`, a stranded `prepared` action is classified as failed before handler entry, and the non-terminal mission is moved to `BLOCKED` with a durable recovery-required event. It never reruns the action. Approval records must come from a trusted caller, and tool handlers remain in-process callbacks. The runner provides composition evidence for the first vertical slice, not a complete production execution platform.
 
 
 Approval time checks use a clock injected when the AuthorityKernel is constructed by the trusted runtime or test harness. The mission/action request itself cannot supply an evaluation timestamp. Tests use a fixed clock through construction to remain deterministic.
