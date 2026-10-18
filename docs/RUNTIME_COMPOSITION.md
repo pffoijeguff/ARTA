@@ -61,16 +61,14 @@ service. This is a key-discovery adapter, not an identity-provider product or se
 registered as a public client: it creates a cryptographically random state, nonce and PKCE
 verifier; sends an S256 challenge to a fixed HTTPS authorization endpoint; consumes each pending
 state once; exchanges the code only at a fixed HTTPS token endpoint without redirects; validates
-the ID token through `OidcJwksAuthenticator`; and binds the verified ID token to the original
-nonce. The token response is size-bounded, and refresh tokens are rejected until a protected
+the ID token through `OidcJwksAuthenticator`; binds the verified ID token to the original nonce, and requires a per-transaction browser-binding cookie so an attacker cannot complete a login flow initiated in another browser. The token response is size-bounded, and refresh tokens are rejected until a protected
 refresh-token lifecycle exists.
 
 The application must register the exact HTTPS redirect URI with its identity provider, configure
 the authorization and token endpoints from trusted provider metadata, and configure the JWKS
 authenticator's issuer and audience to match that provider and client ID. The client intentionally
 does not accept a client secret. By default it keeps pending transactions in process memory, suitable only for single-process use. For a shared deployment, inject EncryptedSQLitePendingLoginStore, which encrypts the verifier and nonce with AES-256-GCM and atomically consumes state inside a SQLite write transaction. Configure the same operator-managed 32-byte key on every worker using a protected secret manager; protect the database directory, backups and WAL files, and rotate keys deliberately because rotation invalidates outstanding logins. A shared filesystem must provide SQLite's required locking semantics. The store fails closed on wrong keys, corruption, expiry, and replay. It is not an HTTP callback server, browser session manager, MFA system, logout/revocation
-service, or full product login UI. The host app must validate its own browser session/cookie policy
-and must not log access tokens or callback codes. The returned principal has an empty scope set because
+service, or full product login UI. The host app must set the returned binding cookie as Secure, HttpOnly, SameSite=Lax, host-only, and short-lived; on callback it must read the cookie named by login.browser_binding_cookie_name(callback_state), pass its value to complete_login, and clear it. This browser binding prevents cross-browser login CSRF when the host follows the cookie contract. The host must also use TLS and must not log access tokens, callback codes, state values, or binding cookies. The returned principal has an empty scope set because
 standard OIDC ID tokens establish identity and do not, by themselves, grant ARTA tool permissions.
 Do not pass the ID token as a scoped tool-access token; provision tool permissions separately through
 a trusted authorization policy or a separately verified access token.
@@ -98,14 +96,32 @@ login = OidcAuthorizationCodeClient(
 )
 start = login.begin_login()
 # load_32_byte_key_from_secret_manager() is an application-provided secret-manager adapter.
+# Set this cookie on the response before redirecting. Use a host-only cookie with:
+# Secure=True, HttpOnly=True, SameSite="Lax", Path="/", Max-Age=start.expires_in_seconds.
+set_cookie(
+    name=start.browser_binding_cookie_name,
+    value=start.browser_binding_cookie_value,
+    secure=True,
+    httponly=True,
+    samesite="Lax",
+    path="/",
+    max_age=start.expires_in_seconds,
+)
 # Redirect the browser to start.authorization_url.
-# In the registered callback, pass the received code and state to:
-result = login.complete_login(code=callback_code, state=callback_state)
+# In the callback, find the per-state cookie and pass it to the client:
+cookie_name = login.browser_binding_cookie_name(callback_state)
+binding_cookie = request.cookies.get(cookie_name)
+result = login.complete_login(
+    code=callback_code,
+    state=callback_state,
+    browser_binding=binding_cookie,
+)
+# Clear that cookie in the callback response after processing.
 # Only after success should the host app establish its own protected session.
 ```
 
 No live identity-provider credentials are included in the repository; provider registration,
-MFA policy, production callback hosting, browser cookie controls, and deployment testing remain
+MFA policy, production callback hosting, browser cookie integration, provider configuration, and deployment testing remain
 operator/application responsibilities.
 
 
