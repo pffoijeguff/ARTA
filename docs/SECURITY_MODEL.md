@@ -137,12 +137,18 @@ Residual risks:
 - SQLite data is not encrypted at rest. Mission goals, acceptance criteria, evidence summaries, and event metadata may contain user data; do not include passwords, API keys, cookies, or other secrets.
 - A hash chain detects partial/uncoordinated edits, but it is not an external signature and cannot stop a database-level attacker from rewriting the full database and recomputing the chain.
 - File permissions are only one local control; the OS account, backups, WAL files, and parent directory also need protection.
-- A crash after a handler begins can leave an action in started or unknown. The store surfaces it for review and never assumes it is safe to retry.
+- A crash after a handler begins can leave an action in started or unknown. The explicit recovery API marks stranded started actions unknown, blocks the mission, and never assumes a retry is safe. A stranded prepared action is classified as failed-before-start because the runner persists started before entering the handler.
 - The store does not create authenticated identities. The application layer must authenticate approvers before inserting an approval record.
 - Revocation is reloaded before the invocation, but this in-process prototype does not make approval lookup and arbitrary side effects one atomic transaction; it is not a multi-user production authorization service.
 
 
-## 13. Cooperative cancellation and deadline boundary
+## 13. Restart reconciliation boundary
+
+`MissionRunner.recover_interrupted_mission(mission_id)` is intentionally a reconciliation operation, not a resumable scheduler. It loads the stored mission and durable action journal, marks entries left at `started` as `unknown`, resolves stranded `prepared` entries as failed-before-start, records a recovery-required audit event, and blocks any non-terminal mission. It does not call tools, repeat writes, infer success from result digests, or construct a replacement plan.
+
+Automatic resumption remains unsafe because the durable snapshot omits the exact versioned execution plan and raw results used by the verifier. Human review must reconcile any uncertain external effect. A future resumable runtime needs explicit idempotency/reconciliation contracts, durable plan/version metadata, and well-defined result/evidence retention before it can safely continue interrupted work.
+
+## 14. Cooperative cancellation and deadline boundary
 
 The prototype uses monotonic deadlines and a thread-safe cancellation token. Mission-wide timeouts are narrowed by optional per-tool timeouts; a contextual handler can poll the shared ExecutionControl while it runs. Cancellation and deadline exceptions are preserved as distinct outcomes in the mission state and the action journal.
 
