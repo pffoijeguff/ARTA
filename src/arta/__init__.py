@@ -25,6 +25,7 @@ from .persistence import SQLiteMissionStore, StoreError, StoreIntegrityError
 from .workspace import WorkspaceAdapter, WorkspaceError
 from .identity import AuthenticatedPrincipal, IdentityError, JwtPrincipalAuthenticator, TrustedApprovalService
 from .sandbox import BubblewrapSandbox, SandboxError, SandboxResult
+from .sandbox_tool import register_sandbox_tool
 
 __all__ = [
     "HmacApprovalAuthority",
@@ -58,6 +59,7 @@ __all__ = [
     "BubblewrapSandbox",
     "SandboxError",
     "SandboxResult",
+    "register_sandbox_tool",
     "create_approval_record",
     "fingerprint_action",
     "verify_mission",

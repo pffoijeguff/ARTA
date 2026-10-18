@@ -155,3 +155,13 @@ This file records durable design choices. A decision may be revised, but changes
 **Reason:** An in-process callback cannot be treated as a security sandbox, and cooperative timeouts cannot safely kill arbitrary blocking code. A separate OS-enforced boundary reduces the consequences of unsafe tool behavior.
 
 **Consequences:** The temporary workspace is non-persistent; result promotion must pass through a trusted reviewed write path. Bubblewrap and Linux namespace support are deployment prerequisites. Real-host tests and threat review remain release gates; this is not a guarantee against kernel vulnerabilities or a compromised host account.
+
+## ADR-0015 — Explicit approval-gated sandbox tool bridge
+
+**Status:** Accepted for the prototype.
+
+**Decision:** Expose Bubblewrap process execution to ToolGateway only through an explicit `register_sandbox_tool` adapter. The registered ToolSpec is non-read-only, always requires action-bound approval, restricts the executable target to the trusted sandbox alias set, accepts argv as JSON data, and returns bounded execution status for independent verification.
+
+**Reason:** Having a sandbox class available does not mean the agent runtime actually uses it. An explicit adapter makes the security boundary visible and testable without pretending that arbitrary in-process handlers are isolated.
+
+**Consequences:** Runtime assembly must choose this adapter for command execution and configure a trusted approval verifier. Directly registered Python handlers remain in-process. Unit tests verify policy wiring but do not establish kernel isolation; the real Bubblewrap integration test and deployment review remain release gates.

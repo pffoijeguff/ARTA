@@ -177,3 +177,10 @@ Residual risks and deployment requirements:
 - The task can read non-excluded content in its configured workspace. Do not place credentials or unrelated private files there.
 - Workspace changes are not persistent. Any write-back must pass through a separate authorized adapter and independent verification.
 - The main ToolGateway is still an in-process callback mechanism; registering a callback does not automatically put it inside Bubblewrap.
+
+
+## 18. ToolGateway-to-sandbox wiring
+
+The optional `register_sandbox_tool` bridge registers a non-read-only tool that always requires an action-bound approval and restricts its executable target to the configured sandbox alias set. The argument vector is data, not shell syntax. Tests confirm that an unapproved call does not reach the adapter and that an unknown executable alias is denied by policy before process launch.
+
+The adapter does not globally intercept other ToolGateway handlers. A tool that was registered directly with an arbitrary Python callback still runs in-process. Runtime construction is part of the trusted computing base: it must use the actual BubblewrapSandbox, configure an approval verifier, protect the HMAC key and JWT key ring, and keep token/approval issuance away from models and untrusted request bodies. Adapter unit tests mock the process method and therefore do not prove OS isolation; the opt-in real-host integration test remains a release gate.
