@@ -154,6 +154,11 @@ class OidcJwksAuthenticator:
                 parsed_key = jwt.PyJWK.from_dict(jwk_data, algorithm=alg)
                 if expected_kty == "RSA" and parsed_key.key.key_size < 2048:
                     raise IdentityError("RSA JWKS signing keys must be at least 2048 bits.")
+                if expected_kty == "EC":
+                    expected_curve = {"ES256": "secp256r1", "ES384": "secp384r1",
+                                      "ES512": "secp521r1"}[alg]
+                    if parsed_key.key.curve.name != expected_curve:
+                        raise IdentityError("EC JWKS curve does not match its declared signing algorithm.")
                 public_key = parsed_key.key.public_bytes(
                     encoding=serialization.Encoding.PEM,
                     format=serialization.PublicFormat.SubjectPublicKeyInfo,
