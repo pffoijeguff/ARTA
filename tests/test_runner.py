@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+import threading
+import time
+
+from arta.control import CancellationToken, ExecutionControl
+from arta.persistence import SQLiteMissionStore
 from arta.core import (
     Approval,
     AuthorityKernel,
@@ -224,3 +229,151 @@ def test_duplicate_action_ids_are_rejected_during_plan_construction() -> None:
         assert "unique" in str(exc)
     else:
         raise AssertionError("Duplicate action ids must not be accepted.")
+
+
+
+def test_pre_cancelled_mission_does_not_start_any_tool() -> None:
+    calls: list[str] = []
+    gateway = ToolGateway()
+    gateway.register(ToolSpec("safe.read", lambda args: calls.append("ran") or {"ok": True}))
+    item = Mission("Do not start a cancelled mission", ("read",))
+    plan = MissionPlan((PlannedAction("read-1", "safe.read", "read"),))
+    token = CancellationToken()
+    assert token.cancel()
+
+    report = MissionRunner(gateway).run(
+        item,
+        plan,
+        passing_verifier,
+        cancellation_token=token,
+    )
+
+    assert report.state is MissionState.CANCELLED
+    assert not report.completed
+    assert calls == []
+
+
+def test_cancellation_during_cooperative_tool_is_journaled_as_uncertain() -> None:
+    calls: list[str] = []
+    gateway = ToolGateway()
+    token = CancellationToken()
+
+    def cooperative(_args, control: ExecutionControl):
+        calls.append("started")
+        while True:
+            control.raise_if_stopped()
+            time.sleep(0.002)
+
+    gateway.register(ToolSpec(
+        "cooperative.wait",
+        None,
+        contextual_handler=cooperative,
+        timeout_seconds=1.0,
+    ))
+    item = Mission("Cancel a waiting tool", ("waited",))
+    plan = MissionPlan((PlannedAction("wait-1", "cooperative.wait", "waited"),))
+    with SQLiteMissionStore(":memory:") as store:
+        timer = threading.Timer(0.03, token.cancel)
+        timer.start()
+        try:
+            report = MissionRunner(gateway, store).run(
+                item, plan, passing_verifier, cancellation_token=token, timeout_seconds=2.0
+            )
+            assert report.state is MissionState.CANCELLED
+            assert not report.completed
+            assert calls == ["started"]
+            assert store.action_journal(item.mission_id)[0]["status"] == "unknown"
+            assert store.unresolved_actions(item.mission_id)[0]["status"] == "unknown"
+        finally:
+            timer.cancel()
+            timer.join(timeout=1.0)
+
+
+def test_tool_specific_deadline_stops_a_cooperative_handler() -> None:
+    calls: list[str] = []
+    gateway = ToolGateway()
+
+    def cooperative(_args, control: ExecutionControl):
+        calls.append("started")
+        while True:
+            control.raise_if_stopped()
+            time.sleep(0.002)
+
+    gateway.register(ToolSpec(
+        "cooperative.wait",
+        None,
+        contextual_handler=cooperative,
+        timeout_seconds=0.015,
+    ))
+    item = Mission("Bound a tool's runtime", ("waited",))
+    plan = MissionPlan((PlannedAction("wait-1", "cooperative.wait", "waited"),))
+
+    with SQLiteMissionStore(":memory:") as store:
+        report = MissionRunner(gateway, store).run(item, plan, passing_verifier)
+        assert report.state is MissionState.FAILED
+        assert report.failed_action_id == "wait-1"
+        assert calls == ["started"]
+        assert store.action_journal(item.mission_id)[0]["status"] == "unknown"
+        assert store.unresolved_actions(item.mission_id)[0]["error_type"] == "ExecutionDeadlineExceeded"
+
+
+def test_non_cooperative_handler_may_finish_effect_after_deadline() -> None:
+    effects: list[str] = []
+
+    def ordinary_handler(_args):
+        time.sleep(0.02)
+        effects.append("effect-finished")
+        return {"ok": True}
+
+    gateway = ToolGateway()
+    gateway.register(ToolSpec("slow.read", ordinary_handler, timeout_seconds=0.001))
+    item = Mission("Demonstrate cooperative-timeout boundary", ("read",))
+    plan = MissionPlan((PlannedAction("slow-1", "slow.read", "read"),))
+
+    with SQLiteMissionStore(":memory:") as store:
+        report = MissionRunner(gateway, store).run(item, plan, passing_verifier)
+        assert report.state is MissionState.FAILED
+        assert effects == ["effect-finished"]
+        assert "uncertain" in report.reason
+        assert store.action_journal(item.mission_id)[0]["status"] == "unknown"
+
+
+def test_mission_deadline_expires_before_any_tool_starts() -> None:
+    calls: list[str] = []
+    gateway = ToolGateway()
+    gateway.register(ToolSpec("safe.read", lambda args: calls.append("ran") or {"ok": True}))
+    item = Mission("Never start after an expired deadline", ("read",))
+    plan = MissionPlan((PlannedAction("read-1", "safe.read", "read"),))
+
+    report = MissionRunner(gateway).run(
+        item,
+        plan,
+        passing_verifier,
+        timeout_seconds=1e-12,
+    )
+
+    assert report.state is MissionState.FAILED
+    assert calls == []
+
+
+def test_cancellation_during_verification_cannot_produce_success() -> None:
+    gateway = ToolGateway()
+    gateway.register(ToolSpec("safe.read", lambda args: {"ok": True}))
+    item = Mission("Do not complete a cancelled verification", ("read",))
+    plan = MissionPlan((PlannedAction("read-1", "safe.read", "read"),))
+    token = CancellationToken()
+
+    def cancel_then_claim_pass(_action, _result):
+        token.cancel()
+        return EvidenceOutcome.PASS, "This result must not authorize completion."
+
+    report = MissionRunner(gateway).run(
+        item,
+        plan,
+        cancel_then_claim_pass,
+        cancellation_token=token,
+    )
+
+    assert report.state is MissionState.CANCELLED
+    assert not report.completed
+    assert item.evidence[-1].outcome is EvidenceOutcome.INCONCLUSIVE

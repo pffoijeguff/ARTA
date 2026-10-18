@@ -18,11 +18,16 @@ from .core import (
     fingerprint_action,
     verify_mission,
 )
+from .control import CancellationToken, ExecutionCancelled, ExecutionControl, ExecutionDeadlineExceeded
 from .runner import MissionPlan, MissionRunReport, MissionRunner, PlannedAction
 from .persistence import SQLiteMissionStore, StoreError, StoreIntegrityError
 
 __all__ = [
     "Approval",
+    "CancellationToken",
+    "ExecutionCancelled",
+    "ExecutionControl",
+    "ExecutionDeadlineExceeded",
     "ApprovalStatus",
     "AuthorityKernel",
     "AuditEvent",

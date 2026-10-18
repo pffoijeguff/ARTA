@@ -104,3 +104,14 @@ This file records durable design choices. A decision may be revised, but changes
 **Reason:** In-memory audit is lost on restart, and retrying a tool after an ambiguous interruption can duplicate an external effect.
 
 **Consequences:** The prototype gains durable state and tamper-evident event sequencing, but not encrypted storage, authenticated approvers, atomic coupling to arbitrary external side effects, or safe automatic resumption. The database and its backups/WAL must be protected as sensitive user data.
+
+
+## ADR-0011 — Cooperative cancellation, not unsafe thread termination
+
+**Status:** Accepted.
+
+**Decision:** Use a shared thread-safe cancellation token and monotonic deadlines. Context-aware tool handlers receive an ExecutionControl and must poll it. Ordinary synchronous handlers are checked before and after returning; if a deadline/cancellation is detected after the handler starts, the result is marked uncertain and not automatically retried.
+
+**Reason:** Python cannot safely kill an arbitrary running thread, and pretending that a timeout can reverse an external side effect would make retry behavior unsafe.
+
+**Consequences:** The prototype provides deterministic cancellation boundaries for cooperative tools and can distinguish CANCELLED from FAILED. Hard interruption, process isolation, interruptible adapters, external-effect reconciliation, and rollback remain adapter/platform responsibilities.

@@ -88,6 +88,7 @@ Implemented in this slice:
 - A MissionRunner that preflights the complete plan before any tool runs, pauses when approvals are missing, executes authorized actions, and requests explicit evidence from a verifier callback.
 - An optional SQLiteMissionStore that checkpoints mission state and evidence, persists action-bound approvals, and keeps hash-chained mission, approval, and action event streams.
 - A durable action journal with prepared / started / succeeded / failed / unknown transitions; tool arguments and output bodies are not stored, and actions with uncertain outcomes are surfaced rather than automatically retried.
+- Cooperative mission cancellation and monotonic deadlines, plus optional per-tool timeouts. Context-aware handlers can poll an ExecutionControl object; deadline expiry or cancellation produces a terminal mission result and preserves uncertain-action journal state.
 - Exact argument contracts and explicit target allowlists for registered tools.
 - Action-bound approvals using a stable SHA-256 fingerprint over the tool name and complete JSON arguments; approvals expire and are rejected if revoked, future-dated, expired, or reused for a changed action. Evaluation time comes from a trusted runtime-configured clock, not the incoming action request.
 - Structured evidence records scoped to an acceptance criterion, with PASS / FAIL / INCONCLUSIVE outcomes, source-action IDs, timestamps, and summaries.
@@ -96,7 +97,7 @@ Implemented in this slice:
 - Strict JSON input/output validation, nesting and payload-size limits, and tests for malformed/circular/non-finite inputs.
 - Automated unit tests for core security invariants, SQLite integrity and revocation, restart persistence, action journaling, and end-to-end orchestration, plus GitHub Actions CI on Python 3.12 and 3.13.
 
-**Important limits:** SQLite persistence is optional; execution and tool handlers still run in-process. The store does not resume interrupted missions automatically, and a journal entry marked started/unknown requires explicit recovery review rather than a blind retry. Approval records still rely on a trusted caller to authenticate the approver; they are not digital signatures. Hash chains and SQLite triggers are tamper-evident safeguards, not protection against an attacker who can rewrite the database and recompute the chains. The database is not encrypted at rest, so protect its location and do not store secrets in mission goals, evidence summaries, or audit details. There is still no agent/model integration, real filesystem or shell tool, external connector, production UI, OS sandbox, or cancellation protocol. Do not use this prototype to control consequential real-world actions.
+**Important limits:** SQLite persistence is optional; execution and tool handlers still run in-process. The store does not resume interrupted missions automatically, and a journal entry marked started/unknown requires explicit recovery review rather than a blind retry. Approval records still rely on a trusted caller to authenticate the approver; they are not digital signatures. Hash chains and SQLite triggers are tamper-evident safeguards, not protection against an attacker who can rewrite the database and recompute the chains. The database is not encrypted at rest, so protect its location and do not store secrets in mission goals, evidence summaries, or audit details. ExecutionControl does not forcibly interrupt arbitrary Python callbacks: ordinary handlers are checked before and after returning, while only context-aware handlers can observe cancellation/deadlines mid-operation by polling. There is still no agent/model integration, real filesystem or shell tool, external connector, production UI, or OS sandbox. Do not use this prototype to control consequential real-world actions.
 
 ### Run locally
 
@@ -130,6 +131,20 @@ with SQLiteMissionStore("arta.sqlite3") as store:
 
 Persist an approval through the trusted application boundary with `store.put_approval(approval)`; revocation is recorded with `store.revoke_approval(approval_id, actor_id=..., reason=...)`. When a plan carries an approval and a store is configured, the runner reloads the latest stored status instead of trusting a stale in-memory approval object. The store is an early persistence layer, not an identity provider or encrypted secret vault.
 
+### Deadlines and cooperative cancellation
+
+A mission can accept an overall timeout and a cancellation token:
+
+```python
+from arta.control import CancellationToken
+
+token = CancellationToken()
+report = runner.run(mission, plan, verifier, timeout_seconds=120, cancellation_token=token)
+# A coordinating thread or UI can call token.cancel() to request cancellation.
+```
+
+A tool can set `timeout_seconds` in its `ToolSpec`. To respond while work is in progress, register a `contextual_handler(arguments, control)` and periodically call `control.raise_if_stopped()`. Do not assume this can kill a blocking library call or roll back an external side effect. If a started action times out or is cancelled, ARTA marks its outcome unknown for review and does not retry it automatically.
+
 ## Development direction
 
 The SQLite milestone now persists mission snapshots, approval lifecycle state, hash-chained audit records, and a privacy-minimizing action journal. Next, the project needs safe restart/reconciliation semantics, bounded timeouts and cancellation, an OS-level workspace sandbox, and authenticated approval at a trusted API/UI boundary. The current runner remains in-process and mock-friendly; durable data does not itself make execution safe or automatically resumable. Agent/model integration, external connectors, and the Command Center UI should follow only after those trust boundaries are independently tested. See the [roadmap](docs/ROADMAP.md).
@@ -142,7 +157,7 @@ The SQLite milestone now persists mission snapshots, approval lifecycle state, h
 
 رابط فارسی و راست‌به‌چپ، پردازش محلی در صورت امکان، انتخاب‌پذیری مدل، تیم عامل‌ها، درگاه ابزار، هستهٔ مجوزدهی، حافظهٔ قابل‌کنترل و آزمایش قابلیت‌ها پیش از پذیرش، از اهداف طراحی پروژه‌اند.
 
-**وضعیت فعلی مخزن:** هستهٔ پایتون اکنون یک هماهنگ‌کنندهٔ اجرایی کوچک و ذخیره‌ساز اختیاری SQLite برای وضعیت مأموریت، چرخهٔ مجوزها، رویدادهای زنجیره‌هش‌شده و دفتر ثبت اقدامات دارد. این نمونه محصول کامل ARTA نیست و اجرای خودکارِ امن یا بازیابی بی‌نیاز از بازبینی را تضمین نمی‌کند. قابلیت‌های دیگر همچنان اهداف طراحی‌اند، مگر آن‌که صریحاً پیاده‌سازی‌شده معرفی شده باشند.
+**وضعیت فعلی مخزن:** هستهٔ پایتون اکنون یک هماهنگ‌کنندهٔ اجرایی کوچک، ذخیره‌ساز اختیاری SQLite، دفتر ثبت اقدامات و کنترل همکارانهٔ لغو/مهلت اجرا دارد. ابزارهای همکارانه می‌توانند هنگام اجرا لغو یا مهلت را بررسی کنند؛ توابع همگام معمولی را نمی‌توان به‌زور متوقف کرد. این نمونه محصول کامل ARTA نیست و بازیابی خودکار یا ایمنی اجرای واقعی را تضمین نمی‌کند. سایر قابلیت‌ها همچنان اهداف طراحی‌اند، مگر آن‌که صریحاً پیاده‌سازی‌شده معرفی شده باشند.
 
 ## Status and contribution
 

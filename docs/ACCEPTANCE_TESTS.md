@@ -130,4 +130,18 @@ The current suite also covers:
 - runner checkpoints across execution and verification;
 - current persisted revocation defeating a stale approval object supplied by the plan.
 
-Still open: process-kill/crash injection at every boundary, reliable restart reconciliation, deadline enforcement, cancellation of in-flight external work, authenticated multi-user approval, encrypted-at-rest storage, and adversarial tests involving a database-level attacker.
+Still open: process-kill/crash injection at every boundary, reliable restart reconciliation, enforcement for blocking real external operations, cancellation acknowledgement from real adapters, authenticated multi-user approval, encrypted-at-rest storage, and adversarial tests involving a database-level attacker.
+
+
+## 12. Cooperative deadlines and cancellation tests
+
+The current suite additionally checks:
+- cancellation tokens are idempotent and shared by child execution controls;
+- monotonic deadlines expire and child deadlines cannot extend parent deadlines;
+- malformed or excessive timeout values are rejected;
+- a pre-cancelled mission starts no tool;
+- a context-aware handler stops when cancellation or a tool-specific deadline is observed;
+- a non-cooperative handler may finish an effect after the deadline, but the mission fails closed and the journal marks the result unknown;
+- cancellation during verification creates INCONCLUSIVE evidence and cannot produce a successful mission.
+
+Not covered: killing stuck external processes, forced cancellation of blocking libraries, socket-level timeout behavior for real adapters, or rollback of external side effects.

@@ -93,6 +93,7 @@ class MissionState(str, Enum):
     COMPLETED = "completed"
     BLOCKED = "blocked"
     FAILED = "failed"
+    CANCELLED = "cancelled"
 
 
 class PolicyEffect(str, Enum):
@@ -114,14 +115,26 @@ class ApprovalStatus(str, Enum):
 
 
 TRANSITIONS = {
-    MissionState.CREATED: {MissionState.PLANNED, MissionState.BLOCKED},
-    MissionState.PLANNED: {MissionState.AWAITING_APPROVAL, MissionState.RUNNING, MissionState.BLOCKED},
-    MissionState.AWAITING_APPROVAL: {MissionState.RUNNING, MissionState.BLOCKED},
-    MissionState.RUNNING: {MissionState.VERIFYING, MissionState.FAILED, MissionState.BLOCKED},
-    MissionState.VERIFYING: {MissionState.COMPLETED, MissionState.FAILED, MissionState.BLOCKED},
+    MissionState.CREATED: {
+        MissionState.PLANNED, MissionState.BLOCKED, MissionState.FAILED, MissionState.CANCELLED,
+    },
+    MissionState.PLANNED: {
+        MissionState.AWAITING_APPROVAL, MissionState.RUNNING, MissionState.BLOCKED,
+        MissionState.FAILED, MissionState.CANCELLED,
+    },
+    MissionState.AWAITING_APPROVAL: {
+        MissionState.RUNNING, MissionState.BLOCKED, MissionState.FAILED, MissionState.CANCELLED,
+    },
+    MissionState.RUNNING: {
+        MissionState.VERIFYING, MissionState.FAILED, MissionState.BLOCKED, MissionState.CANCELLED,
+    },
+    MissionState.VERIFYING: {
+        MissionState.COMPLETED, MissionState.FAILED, MissionState.BLOCKED, MissionState.CANCELLED,
+    },
     MissionState.COMPLETED: set(),
     MissionState.BLOCKED: set(),
     MissionState.FAILED: set(),
+    MissionState.CANCELLED: set(),
 }
 
 
@@ -213,17 +226,34 @@ class Mission:
 @dataclass(frozen=True)
 class ToolSpec:
     name: str
-    handler: Callable[[Mapping[str, Any]], Mapping[str, Any]]
+    handler: Callable[[Mapping[str, Any]], Mapping[str, Any]] | None
     read_only: bool = True
     requires_approval: bool = False
     allowed_arguments: tuple[str, ...] = ()
     required_arguments: tuple[str, ...] = ()
     target_argument: str | None = None
     allowed_targets: tuple[str, ...] = ()
+    timeout_seconds: float | None = None
+    contextual_handler: Callable[[Mapping[str, Any], "ExecutionControl"], Mapping[str, Any]] | None = None
 
     def __post_init__(self) -> None:
         if not self.name or self.name != self.name.strip():
             raise MissionError("Tool name must be a non-empty, trimmed string.")
+        if (self.handler is None) == (self.contextual_handler is None):
+            raise MissionError("Exactly one normal handler or contextual_handler must be provided.")
+        if self.handler is not None and not callable(self.handler):
+            raise MissionError("Tool handler must be callable.")
+        if self.contextual_handler is not None and not callable(self.contextual_handler):
+            raise MissionError("contextual_handler must be callable.")
+        if self.timeout_seconds is not None:
+            if isinstance(self.timeout_seconds, bool) or not isinstance(self.timeout_seconds, (int, float)):
+                raise MissionError("Tool timeout must be finite, greater than zero, and at most 24 hours.")
+            try:
+                tool_timeout = float(self.timeout_seconds)
+            except (OverflowError, TypeError, ValueError):
+                raise MissionError("Tool timeout must be finite, greater than zero, and at most 24 hours.") from None
+            if not math.isfinite(tool_timeout) or not 0 < tool_timeout <= 24 * 60 * 60:
+                raise MissionError("Tool timeout must be finite, greater than zero, and at most 24 hours.")
         if len(set(self.allowed_arguments)) != len(self.allowed_arguments):
             raise MissionError("Allowed tool argument names must be unique.")
         if not set(self.required_arguments).issubset(self.allowed_arguments):
@@ -410,7 +440,10 @@ class ToolGateway:
         arguments: Mapping[str, Any] | None = None,
         *,
         approval: Approval | None = None,
+        execution_control: "ExecutionControl | None" = None,
     ) -> ToolResult:
+        from .control import ExecutionCancelled, ExecutionControl, ExecutionDeadlineExceeded
+
         decision = self.authorize(tool_name, arguments=arguments, approval=approval)
         spec = self._tools.get(tool_name) if isinstance(tool_name, str) else None
         mission.record("tool.policy_decision", {
@@ -423,9 +456,19 @@ class ToolGateway:
             raise MissionError("Tools may only be invoked during an active mission.")
         if mission.state is MissionState.AWAITING_APPROVAL:
             mission.transition(MissionState.RUNNING, "Approval validated for the exact requested action.")
+
+        if execution_control is None:
+            control = ExecutionControl(timeout_seconds=spec.timeout_seconds)
+        else:
+            control = execution_control.child(spec.timeout_seconds)
         normalized = _normalized_arguments(arguments)
         try:
-            output = spec.handler(normalized)
+            control.raise_if_stopped()
+            if spec.contextual_handler is not None:
+                output = spec.contextual_handler(normalized, control)
+            else:
+                output = spec.handler(normalized)
+            control.raise_if_stopped()
             if not isinstance(output, Mapping):
                 raise TypeError("Tool handlers must return a mapping.")
             safe_output = _normalize_json_value(output)
@@ -434,8 +477,14 @@ class ToolGateway:
             encoded = json.dumps(safe_output, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
             if len(encoded.encode("utf-8")) > 256 * 1024:
                 raise ValueError("Tool output exceeds the 256 KiB limit.")
+            control.raise_if_stopped()
             mission.record("tool.invoked", {"tool": tool_name, "success": True})
             return ToolResult(tool_name, True, safe_output, mission.audit[-1])
+        except (ExecutionCancelled, ExecutionDeadlineExceeded) as exc:
+            mission.record("tool.invoked", {
+                "tool": tool_name, "success": False, "error_type": type(exc).__name__
+            })
+            raise
         except Exception as exc:
             mission.record("tool.invoked", {
                 "tool": tool_name, "success": False, "error_type": type(exc).__name__

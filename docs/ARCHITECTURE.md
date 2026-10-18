@@ -187,15 +187,15 @@ See [Acceptance Tests](ACCEPTANCE_TESTS.md), [Security Model](SECURITY_MODEL.md)
 
 The current Python slice provides:
 
-- a guarded eight-state mission lifecycle (CREATED, PLANNED, AWAITING_APPROVAL, RUNNING, VERIFYING, and three terminal outcomes);
+- a guarded nine-state mission lifecycle (CREATED, PLANNED, AWAITING_APPROVAL, RUNNING, VERIFYING, and four terminal outcomes: COMPLETED, BLOCKED, FAILED, CANCELLED);
 - registered in-process tool handlers with allowed/required argument fields and optional exact target allowlists;
 - default-deny handling for unknown tools, malformed JSON arguments, unexpected arguments, missing required values, and disallowed targets;
 - action fingerprints that are stable across JSON object-key order and change when arguments change;
 - approval records tied to the exact tool and arguments, with approver metadata, explicit status, timezone-aware issue time, and expiry checks;
 - criterion-scoped evidence with PASS, FAIL, or INCONCLUSIVE outcomes, source-action references, and timestamp-aware verification;
-- bounded JSON input/output checks and in-memory audit events that avoid recording raw tool payloads.
+- bounded JSON input/output checks and structured audit events that can be checkpointed into SQLite hash chains without recording raw tool payloads.
 
-These records do not authenticate an approver, make evidence independently trustworthy, or make an in-memory audit log tamper-proof. The current gateway only invokes registered Python callbacks inside the process; it does not connect to a host shell, filesystem, browser, model, or external service. Persistence, orchestrator loops, retry/cancellation coordination, an OS sandbox, and a UI remain unimplemented.
+These records do not authenticate an approver, make evidence independently trustworthy, or make persistent audit chains tamper-proof. SQLite persistence is optional; the gateway still invokes registered Python callbacks inside the process and does not connect to a host shell, filesystem, browser, model, or external service. Automatic restart recovery, interruptible external adapters, an OS sandbox, and a UI remain unimplemented.
 
 ## 8. Immediate integration requirements
 
@@ -229,3 +229,10 @@ The approval table persists the exact action fingerprint, approver label, issue/
 The action journal records prepared, started, succeeded, failed, and unknown transitions. It stores the tool name, action fingerprint, timestamps, error class, and a digest of a successful result—not raw arguments, exception text, or result bodies. The store exposes started/unknown records through unresolved_actions(); it never retries them automatically.
 
 Persistence does not yet provide a transactional boundary around an external side effect. A process can stop after an action starts or after the side effect but before its result is recorded. Such cases remain uncertain and need operator-led reconciliation. Hash chains are tamper-evident, not an externally anchored ledger; a database administrator who can rewrite all rows and recompute hashes is outside this protection boundary. The database is not encrypted at rest.
+
+
+## 11. Cooperative execution control
+
+MissionRunner accepts an optional overall timeout and CancellationToken. Each ToolSpec may define a narrower timeout. ToolGateway creates a child ExecutionControl whose monotonic deadline cannot extend the mission deadline; child controls share the same thread-safe cancellation token. The state model distinguishes cancellation from a runtime failure with a terminal CANCELLED state.
+
+Context-aware tools are registered with contextual_handler(arguments, control) and should poll control.raise_if_stopped() during long work. Ordinary one-argument handlers are checked before and after the callback but cannot be interrupted while blocked inside arbitrary synchronous code. A callback can therefore complete an external effect after cancellation/deadline; that action is recorded as unknown, and no automatic retry occurs. Deadlines and cancellation are best-effort execution controls, not an operating-system sandbox or rollback mechanism.

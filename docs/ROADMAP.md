@@ -6,7 +6,7 @@ The project should advance through a few meaningful milestones. Each milestone h
 
 ## Progress snapshot — 2026-10-18
 
-The Python kernel now includes structured evidence, action-bound approval fingerprints, strict tool contracts, and a MissionRunner. The SQLite milestone adds persisted mission snapshots, revocable approval records, hash-chained event streams, an action journal, and optional runner checkpoints. It remains a mock-friendly in-process prototype: safe restart reconciliation, authenticated identities, sandboxing, robust timeout/cancellation, encrypted storage, and the real UI are still open.
+The Python kernel now includes structured evidence, action-bound approvals, strict tool contracts, a MissionRunner, SQLite persistence, a durable action journal, and cooperative cancellation/deadlines. Context-aware handlers can poll a shared control token; arbitrary synchronous handlers are not forcibly interrupted. Safe restart reconciliation, authenticated identities, an OS sandbox, interruptible real adapters, encrypted storage, and the real UI remain open.
 
 ## M0 — Project foundation and contracts
 
@@ -44,7 +44,7 @@ Deliverables:
 - timeout, cancellation, and bounded recovery have tested outcomes;
 - a clean checkout can run the documented checks.
 
-**Current status:** The state/tool/approval/evidence contracts are composed by a tested MissionRunner, and basic durable state/audit/action journaling exists behind SQLiteMissionStore. This closes more of the prototype foundation but not the full M1 release gate: deadlines, cancellation propagation, crash/restart reconciliation, authenticated approvals, and the operating-system sandbox remain open.
+**Current status:** The tested MissionRunner now has basic durable journaling and cooperative cancellation/deadline boundaries. This is still not the full M1 release gate: hard interruption of blocking work, cancellation acknowledgement, crash/restart reconciliation, authenticated approvals, and the operating-system sandbox remain open.
 
 ## M2 — Controlled state changes
 
@@ -123,3 +123,10 @@ The checklist above is not a claim that any milestone is complete. Update milest
 **Delivered:** SQLite mission snapshots with checksums; append-only, hash-chained mission, approval, and action event streams; persisted/revocable action-bound approvals; a journal that tracks prepared/started/succeeded/failed/unknown action states; optional MissionRunner checkpoints; and tests for store reopening, stale approvals, and uncertain action outcomes.
 
 **Not yet delivered:** Automatic or safe mission resumption after a process crash. A started/unknown action is exposed for review and must not be blindly retried. Also pending are authenticated approver identities, encryption at rest, transactional integrations with real tools, timeout/cancellation semantics, and an OS-level sandbox.
+
+
+## Cooperative execution-control milestone — 2026-10-18
+
+**Delivered:** A thread-safe cancellation token, monotonic mission deadlines, narrower per-tool deadlines, contextual handlers that can poll their execution control, a distinct terminal CANCELLED state, and tests proving that interrupted/expired actions fail closed and are journaled as unknown.
+
+**Boundary:** Python does not safely force-stop arbitrary synchronous callbacks. A standard handler may finish an external effect before the gateway observes the expired deadline. Production adapters must use interruptible APIs and their own socket/process timeout support; the prototype does not claim rollback or hard cancellation.

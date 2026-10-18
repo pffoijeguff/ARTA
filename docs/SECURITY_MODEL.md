@@ -113,7 +113,7 @@ Important residual risks:
 - Capability grants are currently embedded in each ToolSpec; no protected policy database, runtime revocation service, or multi-user boundary exists.
 - The gateway calls in-process handlers. There is no OS sandbox and no real filesystem, shell, network, browser, or external-service integration.
 - Evidence is structured and criterion-scoped, but the code cannot establish that a producer is honest or that a reported external effect is true.
-- Audit events are in memory and mutable at the mission level; they are not tamper-evident or durable.
+- Mission audit events can be persisted through SQLite hash chains and append-only triggers; the chain is tamper-evident but not tamper-proof, externally anchored, or encrypted at rest.
 - Authentication, authorization persistence, secret store integration, retention/deletion enforcement, and adversarial end-to-end tests remain outstanding.
 
 The new checks lower several classes of accidental bypass but do not make this prototype suitable for consequential production use.
@@ -140,3 +140,10 @@ Residual risks:
 - A crash after a handler begins can leave an action in started or unknown. The store surfaces it for review and never assumes it is safe to retry.
 - The store does not create authenticated identities. The application layer must authenticate approvers before inserting an approval record.
 - Revocation is reloaded before the invocation, but this in-process prototype does not make approval lookup and arbitrary side effects one atomic transaction; it is not a multi-user production authorization service.
+
+
+## 13. Cooperative cancellation and deadline boundary
+
+The prototype uses monotonic deadlines and a thread-safe cancellation token. Mission-wide timeouts are narrowed by optional per-tool timeouts; a contextual handler can poll the shared ExecutionControl while it runs. Cancellation and deadline exceptions are preserved as distinct outcomes in the mission state and the action journal.
+
+This design intentionally does not use unsafe thread termination. A standard synchronous handler cannot be forcibly stopped: the gateway detects cancellation/deadline before and after it returns, which may be after the side effect happened. Such an action is marked unknown and requires review. Hard process isolation, interruptible adapters, network/socket timeouts, external-effect reconciliation, and cancellation acknowledgements remain production requirements.

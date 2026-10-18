@@ -24,8 +24,9 @@ from .core import (
     verify_mission,
     fingerprint_action,
 )
-
+from .control import CancellationToken, ExecutionCancelled, ExecutionControl, ExecutionDeadlineExceeded
 from .persistence import SQLiteMissionStore, StoreError
+
 
 
 @dataclass(frozen=True)
@@ -103,7 +104,7 @@ from .persistence import SQLiteMissionStore, StoreError
 
 
 class MissionRunner:
-    """Preflights, executes, verifies, and optionally checkpoints a mission in SQLite."""
+    """Preflights, executes, verifies, and optionally persists a mission."""
 
     def __init__(
         self,
@@ -125,11 +126,82 @@ class MissionRunner:
             raise StoreError("A plan-supplied approval is not present in the persistent approval store.")
         return current
 
+    def _stop_report(
+        self,
+        mission: Mission,
+        control: ExecutionControl,
+        *,
+        results: list[tuple[PlannedAction, ToolResult]] | None = None,
+        action_id: str | None = None,
+    ) -> MissionRunReport | None:
+        try:
+            control.raise_if_stopped()
+        except ExecutionCancelled:
+            return self._terminal_report(
+                mission,
+                MissionState.CANCELLED,
+                "Mission was cancelled before the next execution boundary.",
+                results=results,
+                action_id=action_id,
+            )
+        except ExecutionDeadlineExceeded:
+            return self._terminal_report(
+                mission,
+                MissionState.FAILED,
+                "Mission deadline expired before the next execution boundary.",
+                results=results,
+                action_id=action_id,
+            )
+        return None
+
+    def _terminal_report(
+        self,
+        mission: Mission,
+        target: MissionState,
+        reason: str,
+        *,
+        results: list[tuple[PlannedAction, ToolResult]] | None = None,
+        action_id: str | None = None,
+    ) -> MissionRunReport:
+        if mission.state not in {
+            MissionState.COMPLETED, MissionState.BLOCKED, MissionState.FAILED, MissionState.CANCELLED,
+        }:
+            mission.transition(target, reason)
+        self._checkpoint(mission)
+        return MissionRunReport(
+            mission_id=mission.mission_id,
+            state=mission.state,
+            completed=False,
+            tool_results=tuple(result for _, result in (results or [])),
+            failed_action_id=action_id,
+            reason=reason,
+        )
+
+    def _journal_unknown(
+        self,
+        mission: Mission,
+        action: PlannedAction,
+        fingerprint: str,
+        error_type: str,
+    ) -> None:
+        if self._store is not None:
+            self._store.record_action_event(
+                mission.mission_id,
+                action.action_id,
+                action.tool_name,
+                fingerprint,
+                "unknown",
+                error_type=error_type,
+            )
+
     def run(
         self,
         mission: Mission,
         plan: MissionPlan,
         verifier: ActionVerifier,
+        *,
+        cancellation_token: CancellationToken | None = None,
+        timeout_seconds: float | None = None,
     ) -> MissionRunReport:
         if mission.state not in {
             MissionState.CREATED,
@@ -139,10 +211,16 @@ class MissionRunner:
             raise MissionError("MissionRunner requires a new, planned, or approval-pending mission.")
         if not callable(verifier):
             raise MissionError("A verifier callback is required; tool output is not evidence by itself.")
+        mission_control = ExecutionControl(
+            cancellation_token=cancellation_token,
+            timeout_seconds=timeout_seconds,
+        )
 
-        # Save the starting point first. The store refuses a separately reconstructed
-        # in-memory mission whose audit prefix diverges from the persisted history.
+        # Persist the starting point before planning; never accept a mismatched audit prefix.
         self._checkpoint(mission)
+        stopped = self._stop_report(mission, mission_control)
+        if stopped is not None:
+            return stopped
         if mission.state is MissionState.CREATED:
             mission.transition(MissionState.PLANNED, "Mission plan accepted for preflight.")
             self._checkpoint(mission)
@@ -166,6 +244,9 @@ class MissionRunner:
         pending: list[str] = []
         denied: list[str] = []
         for action in plan.actions:
+            stopped = self._stop_report(mission, mission_control)
+            if stopped is not None:
+                return stopped
             approval = self._current_approval(action)
             decision = self._gateway.authorize(
                 action.tool_name,
@@ -177,7 +258,9 @@ class MissionRunner:
             elif decision.effect is PolicyEffect.DENY:
                 denied.append(action.action_id)
 
-        # Preflight the whole plan before any handler can run.
+        stopped = self._stop_report(mission, mission_control)
+        if stopped is not None:
+            return stopped
         if denied:
             mission.transition(MissionState.BLOCKED, "At least one planned action was denied by policy.")
             self._checkpoint(mission)
@@ -204,8 +287,13 @@ class MissionRunner:
         self._checkpoint(mission)
         results: list[tuple[PlannedAction, ToolResult]] = []
         for action in plan.actions:
-            # Re-read a stored approval immediately before starting this action so an
-            # already persisted revocation is respected instead of a stale plan object.
+            stopped = self._stop_report(
+                mission, mission_control, results=results, action_id=action.action_id
+            )
+            if stopped is not None:
+                return stopped
+            # Re-read stored approval just before starting this action so persisted revocation
+            # is respected instead of trusting the plan's possibly stale approval object.
             approval = self._current_approval(action)
             decision = self._gateway.authorize(
                 action.tool_name,
@@ -236,6 +324,9 @@ class MissionRunner:
                 self._store.record_action_event(
                     mission.mission_id, action.action_id, action.tool_name, fingerprint, "prepared"
                 )
+                # Do not leave a journal entry stranded at "prepared" because a cancellation
+                # landed between two writes. Mark started and let the gateway's preflight check
+                # turn a pre-handler cancellation into an explicit unknown outcome.
                 self._store.record_action_event(
                     mission.mission_id, action.action_id, action.tool_name, fingerprint, "started"
                 )
@@ -245,28 +336,34 @@ class MissionRunner:
                     action.tool_name,
                     action.arguments_copy(),
                     approval=approval,
+                    execution_control=mission_control,
+                )
+            except ExecutionCancelled as exc:
+                self._journal_unknown(mission, action, fingerprint, type(exc).__name__)
+                return self._terminal_report(
+                    mission,
+                    MissionState.CANCELLED,
+                    "Mission was cancelled during a tool action; its external effect may be uncertain.",
+                    results=results,
+                    action_id=action.action_id,
+                )
+            except ExecutionDeadlineExceeded as exc:
+                self._journal_unknown(mission, action, fingerprint, type(exc).__name__)
+                return self._terminal_report(
+                    mission,
+                    MissionState.FAILED,
+                    "Execution deadline expired during a tool action; its external effect may be uncertain.",
+                    results=results,
+                    action_id=action.action_id,
                 )
             except MissionError as exc:
-                if self._store is not None:
-                    # A callback can fail after a partial external effect. Marking this
-                    # as unknown is safer than pretending retry is automatically safe.
-                    self._store.record_action_event(
-                        mission.mission_id,
-                        action.action_id,
-                        action.tool_name,
-                        fingerprint,
-                        "unknown",
-                        error_type=type(exc).__name__,
-                    )
-                mission.transition(MissionState.FAILED, "A planned tool action failed or lost authorization.")
-                self._checkpoint(mission)
-                return MissionRunReport(
-                    mission_id=mission.mission_id,
-                    state=mission.state,
-                    completed=False,
-                    tool_results=tuple(result for _, result in results),
-                    failed_action_id=action.action_id,
-                    reason="An action failed during execution; its external effect may be uncertain, and later actions were not run.",
+                self._journal_unknown(mission, action, fingerprint, type(exc).__name__)
+                return self._terminal_report(
+                    mission,
+                    MissionState.FAILED,
+                    "A planned tool action failed or lost authorization; its external effect may be uncertain.",
+                    results=results,
+                    action_id=action.action_id,
                 )
             if self._store is not None:
                 self._store.record_action_event(
@@ -280,13 +377,39 @@ class MissionRunner:
             results.append((action, result))
             self._checkpoint(mission)
 
+        stopped = self._stop_report(mission, mission_control, results=results)
+        if stopped is not None:
+            return stopped
         mission.transition(MissionState.VERIFYING, "All planned tool calls returned results.")
         self._checkpoint(mission)
         for action, result in results:
+            stopped = self._stop_report(
+                mission, mission_control, results=results, action_id=action.action_id
+            )
+            if stopped is not None:
+                return stopped
             try:
                 outcome, summary = verifier(action, result)
+                mission_control.raise_if_stopped()
                 if not isinstance(outcome, EvidenceOutcome) or not isinstance(summary, str) or not summary.strip():
                     raise ValueError("Verifier result must contain an outcome and a non-empty summary.")
+            except (ExecutionCancelled, ExecutionDeadlineExceeded) as exc:
+                mission.add_evidence(Evidence(
+                    criterion=action.criterion,
+                    outcome=EvidenceOutcome.INCONCLUSIVE,
+                    source_action_id=action.action_id,
+                    summary=f"Verification interrupted ({type(exc).__name__}).",
+                    observed_at=_now(),
+                ))
+                self._checkpoint(mission)
+                target = MissionState.CANCELLED if isinstance(exc, ExecutionCancelled) else MissionState.FAILED
+                return self._terminal_report(
+                    mission,
+                    target,
+                    "Verification was interrupted by cancellation or deadline expiry.",
+                    results=results,
+                    action_id=action.action_id,
+                )
             except Exception as exc:
                 outcome = EvidenceOutcome.INCONCLUSIVE
                 summary = f"Verifier raised {type(exc).__name__}."
@@ -300,6 +423,9 @@ class MissionRunner:
             ))
             self._checkpoint(mission)
 
+        stopped = self._stop_report(mission, mission_control, results=results)
+        if stopped is not None:
+            return stopped
         completed = verify_mission(mission)
         self._checkpoint(mission)
         return MissionRunReport(
