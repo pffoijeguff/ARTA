@@ -127,3 +127,16 @@ These are single-process controls. They do not protect against a compromised Pyt
 
 
 The current evaluator now obtains time from an AuthorityKernel clock configured by the trusted runtime or test harness. Per-action requests cannot pass an arbitrary timestamp to make an expired approval appear valid. Production must keep clock configuration outside user-controlled mission data.
+
+
+## 12. Persistence and interrupted actions
+
+The current SQLite store uses transactions, foreign-key enforcement, full synchronous commits, restrictive file permissions on POSIX systems, snapshot checksums, and per-aggregate SHA-256 hash chains. SQLite triggers make audit-event rows append-only through ordinary SQL operations. The action journal stores an action fingerprint and result digest instead of raw tool arguments or output bodies. The runner checkpoints state around transitions and actions; a stored approval is reloaded so a persisted revocation is not ignored by a stale plan object.
+
+Residual risks:
+- SQLite data is not encrypted at rest. Mission goals, acceptance criteria, evidence summaries, and event metadata may contain user data; do not include passwords, API keys, cookies, or other secrets.
+- A hash chain detects partial/uncoordinated edits, but it is not an external signature and cannot stop a database-level attacker from rewriting the full database and recomputing the chain.
+- File permissions are only one local control; the OS account, backups, WAL files, and parent directory also need protection.
+- A crash after a handler begins can leave an action in started or unknown. The store surfaces it for review and never assumes it is safe to retry.
+- The store does not create authenticated identities. The application layer must authenticate approvers before inserting an approval record.
+- Revocation is reloaded before the invocation, but this in-process prototype does not make approval lookup and arbitrary side effects one atomic transaction; it is not a multi-user production authorization service.

@@ -86,15 +86,17 @@ Implemented in this slice:
 - A default-deny authority decision for unknown tools.
 - A tool gateway that only invokes explicitly registered in-process handlers.
 - A MissionRunner that preflights the complete plan before any tool runs, pauses when approvals are missing, executes authorized actions, and requests explicit evidence from a verifier callback.
+- An optional SQLiteMissionStore that checkpoints mission state and evidence, persists action-bound approvals, and keeps hash-chained mission, approval, and action event streams.
+- A durable action journal with prepared / started / succeeded / failed / unknown transitions; tool arguments and output bodies are not stored, and actions with uncertain outcomes are surfaced rather than automatically retried.
 - Exact argument contracts and explicit target allowlists for registered tools.
 - Action-bound approvals using a stable SHA-256 fingerprint over the tool name and complete JSON arguments; approvals expire and are rejected if revoked, future-dated, expired, or reused for a changed action. Evaluation time comes from a trusted runtime-configured clock, not the incoming action request.
 - Structured evidence records scoped to an acceptance criterion, with PASS / FAIL / INCONCLUSIVE outcomes, source-action IDs, timestamps, and summaries.
 - Verification fails closed if required evidence is missing, the newest evidence fails or is inconclusive, or the latest observations conflict.
 - Audit events record policy outcomes, action fingerprints, and evidence metadata without recording raw tool arguments or exception messages.
 - Strict JSON input/output validation, nesting and payload-size limits, and tests for malformed/circular/non-finite inputs.
-- Automated unit tests for core security invariants and end-to-end orchestration, plus GitHub Actions CI on Python 3.12 and 3.13.
+- Automated unit tests for core security invariants, SQLite integrity and revocation, restart persistence, action journaling, and end-to-end orchestration, plus GitHub Actions CI on Python 3.12 and 3.13.
 
-**Important limits:** this slice remains in-memory and has no persistent storage, agent/model integration, actual filesystem or shell tools, external connectors, or production UI. An evidence record is still only as trustworthy as the verifier and tool-result producer that create it; it does not independently prove an external fact. Approval records also rely on a trusted caller to authenticate the approver—the record is not a digital signature. Audit events are not tamper-proof. Do not use this prototype to control consequential real-world actions.
+**Important limits:** SQLite persistence is optional; execution and tool handlers still run in-process. The store does not resume interrupted missions automatically, and a journal entry marked started/unknown requires explicit recovery review rather than a blind retry. Approval records still rely on a trusted caller to authenticate the approver; they are not digital signatures. Hash chains and SQLite triggers are tamper-evident safeguards, not protection against an attacker who can rewrite the database and recompute the chains. The database is not encrypted at rest, so protect its location and do not store secrets in mission goals, evidence summaries, or audit details. There is still no agent/model integration, real filesystem or shell tool, external connector, production UI, OS sandbox, or cancellation protocol. Do not use this prototype to control consequential real-world actions.
 
 ### Run locally
 
@@ -113,9 +115,24 @@ python -m pytest -q
 
 The CI workflow runs compilation checks, dependency consistency checks, and the test suite. Its result should be verified in GitHub Actions after the workflow executes.
 
+### Optional durable mission store
+
+Provide an existing gateway, mission, plan, and verifier to the runner as usual, then add the store:
+
+```python
+from arta.persistence import SQLiteMissionStore
+from arta.runner import MissionRunner
+
+with SQLiteMissionStore("arta.sqlite3") as store:
+    runner = MissionRunner(gateway, store)
+    report = runner.run(mission, plan, verifier)
+```
+
+Persist an approval through the trusted application boundary with `store.put_approval(approval)`; revocation is recorded with `store.revoke_approval(approval_id, actor_id=..., reason=...)`. When a plan carries an approval and a store is configured, the runner reloads the latest stored status instead of trusting a stale in-memory approval object. The store is an early persistence layer, not an identity provider or encrypted secret vault.
+
 ## Development direction
 
-The next milestone is to persist the mission record, approval lifecycle, action results, and audit stream behind a trusted API boundary, then introduce timeouts/cancellation and an OS-level sandbox. The current MissionRunner is deliberately in-process and mock-friendly: it proves the contracts compose, not that real-world automation is safe. Agent/model integration, durable memory, external connectors, and the Command Center UI should follow only after those trust boundaries are tested. See the [roadmap](docs/ROADMAP.md).
+The SQLite milestone now persists mission snapshots, approval lifecycle state, hash-chained audit records, and a privacy-minimizing action journal. Next, the project needs safe restart/reconciliation semantics, bounded timeouts and cancellation, an OS-level workspace sandbox, and authenticated approval at a trusted API/UI boundary. The current runner remains in-process and mock-friendly; durable data does not itself make execution safe or automatically resumable. Agent/model integration, external connectors, and the Command Center UI should follow only after those trust boundaries are independently tested. See the [roadmap](docs/ROADMAP.md).
 
 ## فارسی
 
@@ -125,7 +142,7 @@ The next milestone is to persist the mission record, approval lifecycle, action 
 
 رابط فارسی و راست‌به‌چپ، پردازش محلی در صورت امکان، انتخاب‌پذیری مدل، تیم عامل‌ها، درگاه ابزار، هستهٔ مجوزدهی، حافظهٔ قابل‌کنترل و آزمایش قابلیت‌ها پیش از پذیرش، از اهداف طراحی پروژه‌اند.
 
-**وضعیت فعلی مخزن:** علاوه بر مستندات پایه، یک نمونهٔ اجرایی کوچک از هستهٔ مأموریت پایتون اضافه شده است؛ این نمونه محصول کامل ARTA نیست. سایر قابلیت‌های مطرح‌شده همچنان اهداف طراحی‌اند، مگر آن‌که صریحاً به‌عنوان پیاده‌سازی‌شده مشخص شده باشند.
+**وضعیت فعلی مخزن:** هستهٔ پایتون اکنون یک هماهنگ‌کنندهٔ اجرایی کوچک و ذخیره‌ساز اختیاری SQLite برای وضعیت مأموریت، چرخهٔ مجوزها، رویدادهای زنجیره‌هش‌شده و دفتر ثبت اقدامات دارد. این نمونه محصول کامل ARTA نیست و اجرای خودکارِ امن یا بازیابی بی‌نیاز از بازبینی را تضمین نمی‌کند. قابلیت‌های دیگر همچنان اهداف طراحی‌اند، مگر آن‌که صریحاً پیاده‌سازی‌شده معرفی شده باشند.
 
 ## Status and contribution
 

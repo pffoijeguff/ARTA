@@ -117,3 +117,17 @@ The current runner tests additionally check:
 - duplicate action IDs are rejected before execution.
 
 The remaining acceptance rows still need implementation and/or independent evidence. In particular, durable persistence, user authentication, a true OS sandbox, cancellation of in-flight external actions, and real connector tests are not covered by these mock-based tests.
+
+
+## 11. SQLite store and durable orchestration tests
+
+The current suite also covers:
+- mission snapshot and hash-chained audit round-trips across closing and reopening the database;
+- idempotent saves, immutable mission identity, and rejection of divergent in-memory audit prefixes;
+- snapshot checksum detection and SQL triggers that reject direct audit-row updates/deletes;
+- persisted approval lookup, durable revocation events, duplicate approval rejection, and malformed fingerprints;
+- journal status transitions, hash-chained action events, result digests instead of output bodies, and surfaced uncertain outcomes;
+- runner checkpoints across execution and verification;
+- current persisted revocation defeating a stale approval object supplied by the plan.
+
+Still open: process-kill/crash injection at every boundary, reliable restart reconciliation, deadline enforcement, cancellation of in-flight external work, authenticated multi-user approval, encrypted-at-rest storage, and adversarial tests involving a database-level attacker.

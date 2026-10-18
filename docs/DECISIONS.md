@@ -93,3 +93,14 @@ This file records durable design choices. A decision may be revised, but changes
 **Reason:** Sequentially discovering a missing permission halfway through a multi-step plan can leave a partial external state that the user did not expect.
 
 **Consequences:** The current runner composes the mission state machine and gateway in memory and stops on the first execution failure. Future durable orchestration must preserve this preflight invariant while also handling approval expiry between preflight and execution, non-idempotent uncertain outcomes, cancellation, and process crashes.
+
+
+## ADR-0010 — Durable SQLite snapshots and uncertain-action journal
+
+**Status:** Accepted for the prototype.
+
+**Decision:** Persist mission snapshots and approval state in SQLite; append mission, approval, and action lifecycle events to per-aggregate hash chains; and record action status transitions without storing raw tool arguments or result bodies. When an execution outcome is uncertain, expose the journal entry for review and do not auto-retry.
+
+**Reason:** In-memory audit is lost on restart, and retrying a tool after an ambiguous interruption can duplicate an external effect.
+
+**Consequences:** The prototype gains durable state and tamper-evident event sequencing, but not encrypted storage, authenticated approvers, atomic coupling to arbitrary external side effects, or safe automatic resumption. The database and its backups/WAL must be protected as sensitive user data.

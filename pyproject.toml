@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "arta-omega-infinity"
 version = "0.1.0"
-description = "A Persian-first AI operating-layer research project with structured evidence and action-bound mission approvals."
+description = "A Persian-first AI operating-layer research project with SQLite mission persistence, action-bound approvals, and evidence-gated execution."
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "Proprietary - project owner to define" }

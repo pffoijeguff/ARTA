@@ -218,3 +218,14 @@ The plan is an in-memory, single-process object. It does not persist checkpoints
 
 
 Approval time checks use a clock injected when the AuthorityKernel is constructed by the trusted runtime or test harness. The mission/action request itself cannot supply an evaluation timestamp. Tests use a fixed clock through construction to remain deterministic.
+
+
+## 10. SQLite persistence and action journal
+
+SQLiteMissionStore is the first durable repository for the prototype. It stores a canonical mission snapshot (goal, acceptance criteria, state, and evidence) and appends new mission audit events only when the local audit history matches the already-persisted prefix. Snapshot checksums detect accidental or uncoordinated edits. Mission, approval, and action-event streams use per-aggregate sequence numbers and a SHA-256 hash chain; SQLite triggers reject ordinary UPDATE and DELETE operations on the event tables.
+
+The approval table persists the exact action fingerprint, approver label, issue/expiry times, and status. Revocation updates the current status in the same transaction as an append-only revocation event. When MissionRunner is configured with a store, it re-reads the current status for an approval referenced by the plan during preflight and immediately before invoking that action.
+
+The action journal records prepared, started, succeeded, failed, and unknown transitions. It stores the tool name, action fingerprint, timestamps, error class, and a digest of a successful result—not raw arguments, exception text, or result bodies. The store exposes started/unknown records through unresolved_actions(); it never retries them automatically.
+
+Persistence does not yet provide a transactional boundary around an external side effect. A process can stop after an action starts or after the side effect but before its result is recorded. Such cases remain uncertain and need operator-led reconciliation. Hash chains are tamper-evident, not an externally anchored ledger; a database administrator who can rewrite all rows and recompute hashes is outside this protection boundary. The database is not encrypted at rest.

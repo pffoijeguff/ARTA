@@ -6,7 +6,7 @@ The project should advance through a few meaningful milestones. Each milestone h
 
 ## Progress snapshot — 2026-10-18
 
-The initial Python kernel now includes structured PASS / FAIL / INCONCLUSIVE evidence, action-bound approval fingerprints, argument/target contracts, and a MissionRunner that preflights the whole plan, executes through ToolGateway, calls a verifier, and gates completion. This is an end-to-end in-memory slice with mock handlers—not the full M1 production milestone. Identity/authentication, persistent mission and audit storage, sandboxing, robust timeout/cancellation, and a real UI are still open.
+The Python kernel now includes structured evidence, action-bound approval fingerprints, strict tool contracts, and a MissionRunner. The SQLite milestone adds persisted mission snapshots, revocable approval records, hash-chained event streams, an action journal, and optional runner checkpoints. It remains a mock-friendly in-process prototype: safe restart reconciliation, authenticated identities, sandboxing, robust timeout/cancellation, encrypted storage, and the real UI are still open.
 
 ## M0 — Project foundation and contracts
 
@@ -44,7 +44,7 @@ Deliverables:
 - timeout, cancellation, and bounded recovery have tested outcomes;
 - a clean checkout can run the documented checks.
 
-**Current status:** The state/tool/approval/evidence contracts are now composed by a tested in-memory MissionRunner. This closes the mock end-to-end orchestration portion of M1 only. Timeouts, cancellation propagation, durable audit storage, authenticated approvals, crash recovery, and the operating-system sandbox remain open, so M1 is not complete.
+**Current status:** The state/tool/approval/evidence contracts are composed by a tested MissionRunner, and basic durable state/audit/action journaling exists behind SQLiteMissionStore. This closes more of the prototype foundation but not the full M1 release gate: deadlines, cancellation propagation, crash/restart reconciliation, authenticated approvals, and the operating-system sandbox remain open.
 
 ## M2 — Controlled state changes
 
@@ -116,3 +116,10 @@ Deliverables:
 Reliability, security, and truthfulness are release blockers. New connectors, animation, and advanced autonomy must not displace state-machine correctness, authorization, containment, and evidence-backed reporting.
 
 The checklist above is not a claim that any milestone is complete. Update milestones only after code, tests, and review evidence exist in the repository.
+
+
+## Persistence milestone — 2026-10-18
+
+**Delivered:** SQLite mission snapshots with checksums; append-only, hash-chained mission, approval, and action event streams; persisted/revocable action-bound approvals; a journal that tracks prepared/started/succeeded/failed/unknown action states; optional MissionRunner checkpoints; and tests for store reopening, stale approvals, and uncertain action outcomes.
+
+**Not yet delivered:** Automatic or safe mission resumption after a process crash. A started/unknown action is exposed for review and must not be blindly retried. Also pending are authenticated approver identities, encryption at rest, transactional integrations with real tools, timeout/cancellation semantics, and an OS-level sandbox.

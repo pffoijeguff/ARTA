@@ -19,6 +19,7 @@ from .core import (
     verify_mission,
 )
 from .runner import MissionPlan, MissionRunReport, MissionRunner, PlannedAction
+from .persistence import SQLiteMissionStore, StoreError, StoreIntegrityError
 
 __all__ = [
     "Approval",
@@ -30,6 +31,9 @@ __all__ = [
     "Mission",
     "MissionError",
     "MissionState",
+    "SQLiteMissionStore",
+    "StoreError",
+    "StoreIntegrityError",
     "PolicyDecision",
     "PolicyEffect",
     "ToolGateway",

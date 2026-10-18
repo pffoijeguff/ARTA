@@ -22,7 +22,10 @@ from .core import (
     _normalized_arguments,
     _now,
     verify_mission,
+    fingerprint_action,
 )
+
+from .persistence import SQLiteMissionStore, StoreError
 
 
 @dataclass(frozen=True)
@@ -96,11 +99,31 @@ class MissionRunReport:
     reason: str = ""
 
 
-class MissionRunner:
-    """Preflights a whole plan, executes only if all actions are authorized, then verifies."""
+from .persistence import SQLiteMissionStore, StoreError
 
-    def __init__(self, gateway: ToolGateway) -> None:
+
+class MissionRunner:
+    """Preflights, executes, verifies, and optionally checkpoints a mission in SQLite."""
+
+    def __init__(
+        self,
+        gateway: ToolGateway,
+        store: SQLiteMissionStore | None = None,
+    ) -> None:
         self._gateway = gateway
+        self._store = store
+
+    def _checkpoint(self, mission: Mission) -> None:
+        if self._store is not None:
+            self._store.save_mission(mission)
+
+    def _current_approval(self, action: PlannedAction) -> Approval | None:
+        if self._store is None or action.approval is None:
+            return action.approval
+        current = self._store.get_approval(action.approval.approval_id)
+        if current is None:
+            raise StoreError("A plan-supplied approval is not present in the persistent approval store.")
+        return current
 
     def run(
         self,
@@ -117,14 +140,19 @@ class MissionRunner:
         if not callable(verifier):
             raise MissionError("A verifier callback is required; tool output is not evidence by itself.")
 
+        # Save the starting point first. The store refuses a separately reconstructed
+        # in-memory mission whose audit prefix diverges from the persisted history.
+        self._checkpoint(mission)
         if mission.state is MissionState.CREATED:
             mission.transition(MissionState.PLANNED, "Mission plan accepted for preflight.")
+            self._checkpoint(mission)
 
         planned_criteria = {action.criterion for action in plan.actions}
         unknown_criteria = planned_criteria.difference(mission.acceptance_criteria)
         uncovered_criteria = set(mission.acceptance_criteria).difference(planned_criteria)
         if unknown_criteria or uncovered_criteria:
             mission.transition(MissionState.BLOCKED, "Plan criteria do not match mission acceptance criteria.")
+            self._checkpoint(mission)
             return MissionRunReport(
                 mission_id=mission.mission_id,
                 state=mission.state,
@@ -138,20 +166,21 @@ class MissionRunner:
         pending: list[str] = []
         denied: list[str] = []
         for action in plan.actions:
+            approval = self._current_approval(action)
             decision = self._gateway.authorize(
                 action.tool_name,
                 action.arguments_copy(),
-                approval=action.approval,
+                approval=approval,
             )
             if decision.effect is PolicyEffect.REQUIRE_APPROVAL:
                 pending.append(action.action_id)
             elif decision.effect is PolicyEffect.DENY:
                 denied.append(action.action_id)
 
-        # Preflight the entire plan before the first side effect. Never run earlier actions
-        # while a later action is still unapproved or forbidden.
+        # Preflight the whole plan before any handler can run.
         if denied:
             mission.transition(MissionState.BLOCKED, "At least one planned action was denied by policy.")
+            self._checkpoint(mission)
             return MissionRunReport(
                 mission_id=mission.mission_id,
                 state=mission.state,
@@ -162,6 +191,7 @@ class MissionRunner:
         if pending:
             if mission.state is MissionState.PLANNED:
                 mission.transition(MissionState.AWAITING_APPROVAL, "Plan contains actions awaiting approval.")
+            self._checkpoint(mission)
             return MissionRunReport(
                 mission_id=mission.mission_id,
                 state=mission.state,
@@ -171,35 +201,93 @@ class MissionRunner:
             )
 
         mission.transition(MissionState.RUNNING, "All planned actions passed policy preflight.")
+        self._checkpoint(mission)
         results: list[tuple[PlannedAction, ToolResult]] = []
         for action in plan.actions:
+            # Re-read a stored approval immediately before starting this action so an
+            # already persisted revocation is respected instead of a stale plan object.
+            approval = self._current_approval(action)
+            decision = self._gateway.authorize(
+                action.tool_name,
+                action.arguments_copy(),
+                approval=approval,
+            )
+            if decision.effect is not PolicyEffect.ALLOW:
+                mission.record("mission.action_recheck_denied", {
+                    "action_id": action.action_id,
+                    "tool": action.tool_name,
+                    "effect": decision.effect.value,
+                    "reason": decision.reason,
+                })
+                mission.transition(MissionState.BLOCKED, "An action failed its final authorization check.")
+                self._checkpoint(mission)
+                return MissionRunReport(
+                    mission_id=mission.mission_id,
+                    state=mission.state,
+                    completed=False,
+                    tool_results=tuple(result for _, result in results),
+                    denied_action_ids=(action.action_id,),
+                    failed_action_id=action.action_id,
+                    reason="Final authorization failed; this and later actions were not invoked.",
+                )
+
+            fingerprint = fingerprint_action(action.tool_name, action.arguments_copy())
+            if self._store is not None:
+                self._store.record_action_event(
+                    mission.mission_id, action.action_id, action.tool_name, fingerprint, "prepared"
+                )
+                self._store.record_action_event(
+                    mission.mission_id, action.action_id, action.tool_name, fingerprint, "started"
+                )
             try:
                 result = self._gateway.invoke(
                     mission,
                     action.tool_name,
                     action.arguments_copy(),
-                    approval=action.approval,
+                    approval=approval,
                 )
-            except MissionError:
+            except MissionError as exc:
+                if self._store is not None:
+                    # A callback can fail after a partial external effect. Marking this
+                    # as unknown is safer than pretending retry is automatically safe.
+                    self._store.record_action_event(
+                        mission.mission_id,
+                        action.action_id,
+                        action.tool_name,
+                        fingerprint,
+                        "unknown",
+                        error_type=type(exc).__name__,
+                    )
                 mission.transition(MissionState.FAILED, "A planned tool action failed or lost authorization.")
+                self._checkpoint(mission)
                 return MissionRunReport(
                     mission_id=mission.mission_id,
                     state=mission.state,
                     completed=False,
                     tool_results=tuple(result for _, result in results),
                     failed_action_id=action.action_id,
-                    reason="An action failed during execution; remaining actions were not run.",
+                    reason="An action failed during execution; its external effect may be uncertain, and later actions were not run.",
+                )
+            if self._store is not None:
+                self._store.record_action_event(
+                    mission.mission_id,
+                    action.action_id,
+                    action.tool_name,
+                    fingerprint,
+                    "succeeded",
+                    result=result.output,
                 )
             results.append((action, result))
+            self._checkpoint(mission)
 
         mission.transition(MissionState.VERIFYING, "All planned tool calls returned results.")
+        self._checkpoint(mission)
         for action, result in results:
             try:
                 outcome, summary = verifier(action, result)
                 if not isinstance(outcome, EvidenceOutcome) or not isinstance(summary, str) or not summary.strip():
                     raise ValueError("Verifier result must contain an outcome and a non-empty summary.")
             except Exception as exc:
-                # Keep the failure type visible without persisting potentially sensitive exception text.
                 outcome = EvidenceOutcome.INCONCLUSIVE
                 summary = f"Verifier raised {type(exc).__name__}."
 
@@ -210,8 +298,10 @@ class MissionRunner:
                 summary=summary.strip()[:1000],
                 observed_at=_now(),
             ))
+            self._checkpoint(mission)
 
         completed = verify_mission(mission)
+        self._checkpoint(mission)
         return MissionRunReport(
             mission_id=mission.mission_id,
             state=mission.state,
