@@ -27,6 +27,7 @@ from .identity import AuthenticatedPrincipal, IdentityError, JwtPrincipalAuthent
 from .oidc import OidcJwksAuthenticator
 from .oidc_login import LoginStart, OidcAuthorizationCodeClient, OidcLoginResult
 from .pending_login_store import EncryptedSQLitePendingLoginStore, InMemoryPendingLoginStore, PendingLogin, PendingLoginStore
+from .oidc_sessions import OidcSession, OidcSessionStoreError, SQLiteOidcSessionStore
 from .sandbox import BubblewrapSandbox, SandboxError, SandboxResult
 from .sandbox_tool import register_sandbox_tool
 from .runtime import SecureRuntime
@@ -68,6 +69,9 @@ __all__ = [
     "InMemoryPendingLoginStore",
     "PendingLogin",
     "PendingLoginStore",
+    "OidcSession",
+    "OidcSessionStoreError",
+    "SQLiteOidcSessionStore",
     "TrustedApprovalService",
     "BubblewrapSandbox",
     "SandboxError",
