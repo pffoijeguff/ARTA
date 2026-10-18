@@ -487,10 +487,10 @@ class SQLiteMissionStore:
                     )
                     for item in snapshot["evidence"]
                 ]
-                mission.audit = []
+                mission._audit = []
                 for event_row in event_rows:
                     payload = json.loads(event_row["event_json"])
-                    mission.audit.append(AuditEvent(
+                    mission._audit.append(AuditEvent(
                         event_type=payload["event_type"],
                         mission_id=payload["mission_id"],
                         timestamp=payload["timestamp"],
