@@ -216,18 +216,32 @@ def test_read_only_tool_requires_registration_and_exact_argument_contract() -> N
         gateway.invoke(item, "report.read", {"path": "reports/final.md", "extra": True})
 
 
-def test_write_action_requires_action_bound_approval() -> None:
+def test_write_action_requires_action_bound_approval_and_consumes_it_once() -> None:
     item = mission("report-created")
     tool = write_tool()
     gateway = ToolGateway(AuthorityKernel(clock=lambda: NOW))
     gateway.register(tool)
     args = {"path": "reports/final.md", "content": "verified"}
+
     with pytest.raises(MissionError, match="approval"):
         gateway.invoke(item, tool.name, args)
+    assert item.state is MissionState.AWAITING_APPROVAL
+    assert any(event.event_type == "tool.approval_requested" for event in item.audit)
+
+    other_args = {"path": "reports/draft.md", "content": "verified"}
+    with pytest.raises(MissionError, match="different action"):
+        gateway.invoke(item, tool.name, other_args, approval=valid_approval(tool, other_args))
+    assert item.state is MissionState.AWAITING_APPROVAL
+
     approval = valid_approval(tool, args)
     result = gateway.invoke(item, tool.name, args, approval=approval)
     assert result.success
     assert result.output == {"written": "reports/final.md"}
+    assert item.state is MissionState.RUNNING
+    assert any(event.event_type == "tool.approval_consumed" for event in item.audit)
+
+    with pytest.raises(MissionError, match="already been consumed"):
+        gateway.invoke(item, tool.name, args, approval=approval)
 
 
 def test_approval_cannot_be_reused_after_arguments_change() -> None:
@@ -337,3 +351,85 @@ def test_tool_spec_requires_exactly_one_handler() -> None:
             lambda args: {"ok": True},
             contextual_handler=lambda args, control: {"ok": True},
         )
+
+def test_tool_spec_copies_capability_allowlists_and_rejects_mutable_contract_changes() -> None:
+    allowed_arguments = ["path"]
+    allowed_targets = ["reports/final.md"]
+    spec = ToolSpec(
+        "report.read",
+        lambda args: {"path": args["path"]},
+        allowed_arguments=allowed_arguments,
+        required_arguments=["path"],
+        target_argument="path",
+        allowed_targets=allowed_targets,
+    )
+    allowed_arguments.append("secret")
+    allowed_targets.append("reports/secrets.txt")
+
+    assert spec.allowed_arguments == ("path",)
+    assert spec.allowed_targets == ("reports/final.md",)
+    decision = AuthorityKernel(clock=lambda: NOW).decide(
+        spec, arguments={"path": "reports/secrets.txt"}
+    )
+    assert decision.effect is PolicyEffect.DENY
+
+    with pytest.raises(MissionError, match="sequence"):
+        ToolSpec("bad-contract", lambda args: {"ok": True}, allowed_arguments="path")
+
+
+def test_audit_timeline_and_nested_details_are_read_only() -> None:
+    item = mission("report-created")
+    item.record("test.nested", {"nested": {"items": ["safe"]}})
+    event = item.audit[-1]
+
+    with pytest.raises(TypeError, match="immutable"):
+        event.details["nested"]["items"].append("tampered")
+    with pytest.raises(TypeError):
+        event.details["nested"]["new"] = "tampered"
+    with pytest.raises(TypeError):
+        event.details["new"] = "tampered"
+    with pytest.raises(AttributeError):
+        item.audit.append(event)  # type: ignore[attr-defined]
+    with pytest.raises(TypeError):
+        item.audit[0] = event  # type: ignore[index]
+
+    assert item.audit[-1].details["nested"]["items"] == ["safe"]
+
+
+def test_gateway_authorizes_and_executes_the_same_argument_snapshot() -> None:
+    from collections.abc import Mapping
+
+    class FlipMapping(Mapping[str, object]):
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def __iter__(self):
+            return iter(("path",))
+
+        def __len__(self) -> int:
+            return 1
+
+        def __getitem__(self, key: str) -> object:
+            return "reports/final.md" if self.calls <= 1 else "reports/secrets.txt"
+
+        def items(self):
+            self.calls += 1
+            value = "reports/final.md" if self.calls == 1 else "reports/secrets.txt"
+            return (("path", value),)
+
+    item = mission("report-created")
+    seen: list[str] = []
+    gateway = ToolGateway(AuthorityKernel(clock=lambda: NOW))
+    gateway.register(ToolSpec(
+        "report.read",
+        lambda args: seen.append(args["path"]) or {"path": args["path"]},
+        allowed_arguments=("path",),
+        required_arguments=("path",),
+        target_argument="path",
+        allowed_targets=("reports/final.md",),
+    ))
+    args = FlipMapping()
+    result = gateway.invoke(item, "report.read", args)
+    assert result.output == {"path": "reports/final.md"}
+    assert seen == ["reports/final.md"]
+    assert args.calls == 1
