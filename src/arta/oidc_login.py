@@ -1,8 +1,9 @@
 """Public-client OIDC Authorization Code + PKCE flow primitives.
 
 This module is an identity-provider client, not an HTTP server or session store. The host
-application must bind callbacks to the configured redirect URI, protect browser state/cookies,
-and create its own authenticated session only after complete_login succeeds.
+application must set the per-transaction browser-binding cookie returned by begin_login, read it
+on the matching callback, bind callbacks to the configured redirect URI, and create its own
+session only after complete_login succeeds.
 """
 from __future__ import annotations
 
