@@ -23,8 +23,7 @@ key and identity configuration must be managed outside the repository and SQLite
 
 ## OIDC JWKS key discovery and rotation
 
-The optional `OidcJwksAuthenticator` can replace the static `JwtPrincipalAuthenticator`
-when an operator has a trusted OIDC issuer and its HTTPS JWKS endpoint. It accepts only a
+The `OidcJwksAuthenticator` implements the same verified-principal contract as `JwtPrincipalAuthenticator` and can be passed directly to `SecureRuntime` and `TrustedApprovalService` when an operator has a trusted OIDC issuer and its HTTPS JWKS endpoint. The composition path is covered by `tests/test_oidc_runtime.py`. It accepts only a
 configured HTTPS URL, refuses redirects, applies a request timeout and 1 MiB response limit,
 requires public signing keys with explicit supported asymmetric algorithms, rejects duplicate
 key IDs/private JWK material, and caches keys for a bounded interval. An unknown `kid` causes
