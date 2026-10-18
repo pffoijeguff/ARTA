@@ -364,7 +364,7 @@ class PolicyDecision:
 
 @dataclass(frozen=True)
 class Approval:
-    """Approval assertion from a trusted UI/API boundary; this record does not authenticate its issuer."""
+    """Action-bound approval; cryptographic verification is supplied by a trusted runtime boundary."""
 
     approval_id: str
     approver_id: str
@@ -372,6 +372,7 @@ class Approval:
     approved_at: str
     expires_at: str
     status: ApprovalStatus = ApprovalStatus.APPROVED
+    signature: str | None = None
 
 
 @dataclass(frozen=True)
@@ -432,9 +433,17 @@ def create_approval_record(
 class AuthorityKernel:
     """Default-deny policy for registered tools, narrow argument contracts, and bounded approvals."""
 
-    def __init__(self, clock: Callable[[], str] | None = None) -> None:
-        # Clock injection is configured by the trusted runtime/test harness, never per action.
+    def __init__(
+        self,
+        clock: Callable[[], str] | None = None,
+        *,
+        approval_verifier: Callable[[Approval], bool] | None = None,
+    ) -> None:
+        # Clock/verifier are configured by the trusted runtime, never supplied per action.
+        if approval_verifier is not None and not callable(approval_verifier):
+            raise MissionError("approval_verifier must be callable.")
         self._clock = clock or _now
+        self._approval_verifier = approval_verifier
 
     def decide(
         self,
@@ -495,6 +504,18 @@ class AuthorityKernel:
             return PolicyDecision(PolicyEffect.DENY, "Approval or evaluation timestamp is invalid.", action_hash)
         if expiry <= issued or issued > current or current >= expiry:
             return PolicyDecision(PolicyEffect.DENY, "Approval is expired or not currently valid.", action_hash)
+        if self._approval_verifier is not None:
+            # A configured verifier turns approval signature checks into a mandatory gate.
+            try:
+                trusted_signature = self._approval_verifier(approval)
+            except Exception:
+                trusted_signature = False
+            if trusted_signature is not True:
+                return PolicyDecision(
+                    PolicyEffect.DENY,
+                    "Approval authenticity verification failed.",
+                    action_hash,
+                )
         return PolicyDecision(PolicyEffect.ALLOW, "Exact action, capability contract, and approval are valid.", action_hash)
 
 
