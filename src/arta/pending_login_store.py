@@ -7,6 +7,7 @@ PKCE verifier/nonce material; it is not a browser-session store.
 from __future__ import annotations
 
 import json
+from contextlib import closing
 import os
 import secrets
 import sqlite3
@@ -76,13 +77,14 @@ class EncryptedSQLitePendingLoginStore:
     def __init__(self, database_path: str | os.PathLike[str], encryption_key: bytes) -> None:
         if not isinstance(encryption_key, bytes) or len(encryption_key) != 32:
             raise ValueError("encryption_key must be exactly 32 bytes (AES-256)")
+        if str(database_path) == ":memory:":
+            raise ValueError("encrypted transaction storage requires a durable SQLite file path")
         path = Path(database_path)
-        if str(database_path) != ":memory:":
-            path.parent.mkdir(parents=True, exist_ok=True)
+        path.parent.mkdir(parents=True, exist_ok=True)
         self._path = str(path)
         self._cipher = AESGCM(encryption_key)
         self._lock = threading.RLock()
-        with self._connect() as db:
+        with closing(self._connect()) as db:
             db.execute("CREATE TABLE IF NOT EXISTS pending_oidc_login (state TEXT PRIMARY KEY, expires_at REAL NOT NULL, nonce BLOB NOT NULL, ciphertext BLOB NOT NULL)")
             db.execute("CREATE INDEX IF NOT EXISTS pending_oidc_login_expiry ON pending_oidc_login(expires_at)")
         if self._path != ":memory:" and os.name == "posix":
@@ -114,7 +116,7 @@ class EncryptedSQLitePendingLoginStore:
         payload = json.dumps({"verifier": verifier, "nonce": nonce}, separators=(",", ":")).encode("utf-8")
         iv = secrets.token_bytes(12)
         ciphertext = self._cipher.encrypt(iv, payload, state.encode("utf-8"))
-        with self._lock, self._connect() as db:
+        with self._lock, closing(self._connect()) as db:
             db.execute("BEGIN IMMEDIATE")
             try:
                 db.execute("DELETE FROM pending_oidc_login WHERE expires_at <= ?", (time.time(),))
