@@ -5,14 +5,19 @@ reverse proxy, configure the exact public origin, and do not log callback query 
 """
 from __future__ import annotations
 
+import base64
+import hmac
 import html
 import json
+import os
 from http.cookies import CookieError, SimpleCookie
-from typing import Callable, Iterable
+from typing import Callable, Iterable, Mapping
 from urllib.parse import parse_qs, urlsplit
 
 from .identity import IdentityError
+from .oidc import OidcJwksAuthenticator
 from .oidc_login import OidcAuthorizationCodeClient
+from .pending_login_store import EncryptedSQLitePendingLoginStore
 from .oidc_sessions import OidcSessionStoreError, SQLiteOidcSessionStore
 
 
@@ -241,3 +246,93 @@ class OidcWebApplication:
         except Exception:
             # Fail closed; details belong in a redacted server-side logger configured by the host.
             return self._json(start_response, "500 Internal Server Error", {"error": "internal_error"})
+
+
+
+def create_app_from_environment(env: Mapping[str, str] | None = None) -> OidcWebApplication:
+    """Build a WSGI app from explicit environment configuration and secret-manager injection.
+
+    Secret values are base64-encoded 32-byte keys. The deployment should inject them through
+    its secret manager/orchestrator, never store them in the repository or a checked-in .env file.
+    """
+    config = os.environ if env is None else env
+
+    def required(name: str) -> str:
+        value = config.get(name, "")
+        if not isinstance(value, str) or not value or value != value.strip():
+            raise ValueError(f"required environment setting {name} is missing or untrimmed")
+        return value
+
+    def key_from_env(name: str) -> bytes:
+        encoded = required(name)
+        try:
+            key = base64.b64decode(encoded, validate=True)
+        except (ValueError, TypeError):
+            raise ValueError(f"environment setting {name} must be valid base64") from None
+        if len(key) != 32:
+            raise ValueError(f"environment setting {name} must decode to exactly 32 bytes")
+        return key
+
+    jwks_url = required("ARTA_OIDC_JWKS_URL")
+    issuer = required("ARTA_OIDC_ISSUER")
+    audience = required("ARTA_OIDC_AUDIENCE")
+    authorization_endpoint = required("ARTA_OIDC_AUTHORIZATION_ENDPOINT")
+    token_endpoint = required("ARTA_OIDC_TOKEN_ENDPOINT")
+    client_id = required("ARTA_OIDC_CLIENT_ID")
+    redirect_uri = required("ARTA_OIDC_REDIRECT_URI")
+    transaction_db = required("ARTA_OIDC_TRANSACTION_DB")
+    session_db = required("ARTA_OIDC_SESSION_DB")
+    transaction_key = key_from_env("ARTA_OIDC_TRANSACTION_KEY_B64")
+    session_key = key_from_env("ARTA_OIDC_SESSION_KEY_B64")
+    if hmac.compare_digest(transaction_key, session_key):
+        raise ValueError("OIDC transaction and session encryption keys must be different")
+    if os.path.abspath(transaction_db) == os.path.abspath(session_db):
+        raise ValueError("OIDC transaction and session databases must use separate files")
+
+    redirect = urlsplit(redirect_uri)
+    if (
+        redirect.scheme != "https"
+        or not redirect.hostname
+        or redirect.username is not None
+        or redirect.password is not None
+        or redirect.query
+        or redirect.fragment
+        or not redirect.path
+        or redirect.path in {"/", "/login", "/session", "/logout"}
+        or redirect.path.startswith("//")
+    ):
+        raise ValueError("ARTA_OIDC_REDIRECT_URI must be a dedicated HTTPS callback URL")
+    public_origin = f"{redirect.scheme}://{redirect.netloc}"
+
+    try:
+        transaction_ttl = int(config.get("ARTA_OIDC_TRANSACTION_TTL_SECONDS", "300"))
+        session_ttl = int(config.get("ARTA_OIDC_SESSION_TTL_SECONDS", "3600"))
+    except (TypeError, ValueError):
+        raise ValueError("OIDC TTL environment settings must be integers") from None
+    if not 30 <= transaction_ttl <= 600:
+        raise ValueError("ARTA_OIDC_TRANSACTION_TTL_SECONDS must be between 30 and 600")
+    if not 60 <= session_ttl <= 30 * 24 * 60 * 60:
+        raise ValueError("ARTA_OIDC_SESSION_TTL_SECONDS must be between 60 and 2592000")
+
+    authenticator = OidcJwksAuthenticator(
+        jwks_url=jwks_url,
+        issuer=issuer,
+        audience=audience,
+    )
+    login_client = OidcAuthorizationCodeClient(
+        authorization_endpoint=authorization_endpoint,
+        token_endpoint=token_endpoint,
+        client_id=client_id,
+        redirect_uri=redirect_uri,
+        authenticator=authenticator,
+        transaction_ttl_seconds=transaction_ttl,
+        pending_store=EncryptedSQLitePendingLoginStore(transaction_db, transaction_key),
+    )
+    return OidcWebApplication(
+        login_client=login_client,
+        session_store=SQLiteOidcSessionStore(session_db, session_key),
+        public_origin=public_origin,
+        callback_path=redirect.path,
+        session_ttl_seconds=session_ttl,
+        after_login_path=config.get("ARTA_OIDC_AFTER_LOGIN_PATH", "/"),
+    )
