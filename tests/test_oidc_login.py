@@ -93,7 +93,7 @@ def test_pkce_state_is_single_use_and_unknown_state_never_exchanges_code():
         client.complete_login(code="authorization-code", state="wrong-state", browser_binding=start.browser_binding_cookie_value)
     assert calls == []
     with pytest.raises(IdentityError, match="ID token"):
-        client.complete_login(code="authorization-code", state=start.state)
+        client.complete_login(code="authorization-code", state=start.state, browser_binding=start.browser_binding_cookie_value)
     assert calls == [True]
     with pytest.raises(IdentityError, match="state"):
         client.complete_login(code="authorization-code", state=start.state)
