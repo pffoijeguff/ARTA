@@ -537,6 +537,14 @@ class ToolGateway:
                 pending = False
         return pending
 
+    @staticmethod
+    def _approval_was_consumed(mission: Mission, approval_id: str) -> bool:
+        return any(
+            event.event_type == "tool.approval_consumed"
+            and event.details.get("approval_id") == approval_id
+            for event in mission.audit
+        )
+
     def invoke(
         self,
         mission: Mission,
@@ -596,6 +604,12 @@ class ToolGateway:
             raise MissionError(f"Tool invocation requires approval: {decision.reason}")
 
         requires_approval = spec.requires_approval or not spec.read_only
+        if requires_approval and approval is None:
+            # Normally intercepted by REQUIRE_APPROVAL; keep this guard independent of policy overrides.
+            raise MissionError("This action requires a valid action-bound approval.")
+        if requires_approval and self._approval_was_consumed(mission, approval.approval_id):
+            raise MissionError("This approval record has already been consumed by this mission.")
+
         if mission.state is MissionState.AWAITING_APPROVAL:
             if (
                 not requires_approval
@@ -611,8 +625,8 @@ class ToolGateway:
             )
 
         if requires_approval:
-            # Record consumption before entering the handler; a failed action cannot silently
-            # replay the same in-memory approval request through this gateway.
+            # Consume before entering the handler, preventing a same-mission replay after success
+            # or an uncertain/failed execution. This does not authenticate the approval issuer.
             mission.record("tool.approval_consumed", {
                 "tool": tool_name,
                 "action_fingerprint": decision.action_fingerprint,
