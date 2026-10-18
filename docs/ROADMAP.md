@@ -186,3 +186,10 @@ on every supported deployment class. A hosted runner result is not a universal L
 certification. A real identity-provider login/token acquisition and operational key-rotation/
 revocation lifecycle remain separate requirements; no credentials or external provider have
 been assumed or fabricated.
+
+
+## OIDC JWKS discovery and rotation — 2026-10-18
+
+**Implemented in this slice:** An optional `OidcJwksAuthenticator` loads keys only from an operator-configured HTTPS JWKS endpoint; refuses redirects and token-supplied key URLs; limits request time, response bytes, key count and cache lifetime; requires explicit supported asymmetric algorithms and unique key IDs; rejects private JWK material; and forces one refresh when a token presents an unknown key ID. The existing verifier continues to enforce fixed issuer/audience, required time claims, bounded token lifetime and scopes. Deterministic tests use synthetic keys and an injected fetcher; they do not contact a live identity provider.
+
+**Not delivered:** Interactive login, OAuth authorization-code/PKCE, client registration, MFA, logout, immediate session revocation, or operational monitoring of a real provider. Cache expiry bounds how quickly removed keys are observed unless the service refreshes/restarts. The adapter is not an identity provider, and deployment must configure trusted issuer/audience/JWKS values and network egress controls. CI results on this branch are the acceptance evidence; no live provider credentials or external configuration are assumed.
