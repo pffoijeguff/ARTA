@@ -286,7 +286,7 @@ def create_app_from_environment(env: Mapping[str, str] | None = None) -> OidcWeb
     session_key = key_from_env("ARTA_OIDC_SESSION_KEY_B64")
     if hmac.compare_digest(transaction_key, session_key):
         raise ValueError("OIDC transaction and session encryption keys must be different")
-    if os.path.abspath(transaction_db) == os.path.abspath(session_db):
+    if os.path.realpath(transaction_db) == os.path.realpath(session_db):
         raise ValueError("OIDC transaction and session databases must use separate files")
 
     redirect = urlsplit(redirect_uri)
