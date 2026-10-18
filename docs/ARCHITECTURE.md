@@ -188,12 +188,13 @@ See [Acceptance Tests](ACCEPTANCE_TESTS.md), [Security Model](SECURITY_MODEL.md)
 The current Python slice provides:
 
 - a guarded nine-state mission lifecycle (CREATED, PLANNED, AWAITING_APPROVAL, RUNNING, VERIFYING, and four terminal outcomes: COMPLETED, BLOCKED, FAILED, CANCELLED);
-- registered in-process tool handlers with allowed/required argument fields and optional exact target allowlists;
+- registered in-process tool handlers with copied immutable allowed/required argument fields and optional exact target allowlists;
 - default-deny handling for unknown tools, malformed JSON arguments, unexpected arguments, missing required values, and disallowed targets;
-- action fingerprints that are stable across JSON object-key order and change when arguments change;
-- approval records tied to the exact tool and arguments, with approver metadata, explicit status, timezone-aware issue time, and expiry checks;
+- a single normalized argument snapshot used for both authorization and execution, with stable action fingerprints over the tool and complete arguments;
+- action-bound approval records with explicit status, timezone-aware issue time, expiry checks, pending-request/consumption audit events, and same-mission replay protection;
 - criterion-scoped evidence with PASS, FAIL, or INCONCLUSIVE outcomes, source-action references, and timestamp-aware verification;
-- bounded JSON input/output checks and structured audit events that can be checkpointed into SQLite hash chains without recording raw tool payloads.
+- a read-only public audit timeline with recursively frozen event details and optional SQLite hash-chained persistence;
+- explicit plan and runtime invocation budgets, capped at 128 planned actions and 128 started tool invocations per mission.
 
 These records do not authenticate an approver, make evidence independently trustworthy, or make persistent audit chains tamper-proof. SQLite persistence is optional; the gateway still invokes registered Python callbacks inside the process and does not connect to a host shell, filesystem, browser, model, or external service. Automatic restart recovery, interruptible external adapters, an OS sandbox, and a UI remain unimplemented.
 
