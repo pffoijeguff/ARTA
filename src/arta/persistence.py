@@ -40,7 +40,9 @@ _MAX_SNAPSHOT_BYTES = 2 * 1024 * 1024
 _TERMINAL_ACTION_STATUSES = {"succeeded", "failed", "unknown"}
 _ACTION_TRANSITIONS = {
     None: {"prepared"},
-    "prepared": {"started"},
+    # A process may crash after recording "prepared" but before recording "started".
+    # The handler has not been entered yet, so recovery can classify this as failed-before-start.
+    "prepared": {"started", "failed"},
     "started": {"succeeded", "failed", "unknown"},
     "succeeded": set(),
     "failed": set(),
