@@ -12,38 +12,39 @@ KEY = b"\x11" * 32
 STATE = "opaque-state-value"
 VERIFIER = "pkce-verifier-that-must-not-be-plaintext"
 NONCE = "oidc-nonce-that-must-not-be-plaintext"
+BINDING_HASH = "a" * 64
 
 
 def test_encrypted_store_is_shared_and_consumes_state_exactly_once(tmp_path):
     path = tmp_path / "oidc-transactions.sqlite3"
     writer = EncryptedSQLitePendingLoginStore(path, KEY)
     reader = EncryptedSQLitePendingLoginStore(path, KEY)
-    writer.put(STATE, VERIFIER, NONCE, time.time() + 60)
+    writer.put(STATE, VERIFIER, NONCE, time.time() + 60, BINDING_HASH)
 
-    result = reader.consume(STATE)
+    result = reader.consume(STATE, browser_binding_hash=BINDING_HASH)
     assert result is not None
     assert result.verifier == VERIFIER
     assert result.nonce == NONCE
-    assert writer.consume(STATE) is None
+    assert writer.consume(STATE, browser_binding_hash=BINDING_HASH) is None
 
 
 def test_encrypted_store_rejects_wrong_key_and_consumes_corrupt_transaction(tmp_path):
     path = tmp_path / "oidc-transactions.sqlite3"
-    EncryptedSQLitePendingLoginStore(path, KEY).put(STATE, VERIFIER, NONCE, time.time() + 60)
+    EncryptedSQLitePendingLoginStore(path, KEY).put(STATE, VERIFIER, NONCE, time.time() + 60, BINDING_HASH)
     wrong_key_store = EncryptedSQLitePendingLoginStore(path, b"\x22" * 32)
 
     with pytest.raises(ValueError, match="authenticated decryption"):
-        wrong_key_store.consume(STATE)
-    assert EncryptedSQLitePendingLoginStore(path, KEY).consume(STATE) is None
+        wrong_key_store.consume(STATE, browser_binding_hash=BINDING_HASH)
+    assert EncryptedSQLitePendingLoginStore(path, KEY).consume(STATE, browser_binding_hash=BINDING_HASH) is None
 
 
 def test_encrypted_store_expired_transaction_cannot_be_consumed(tmp_path):
     path = tmp_path / "oidc-transactions.sqlite3"
     store = EncryptedSQLitePendingLoginStore(path, KEY)
-    store.put(STATE, VERIFIER, NONCE, time.time() + 60)
+    store.put(STATE, VERIFIER, NONCE, time.time() + 60, BINDING_HASH)
 
-    assert store.consume(STATE, now=time.time() + 120) is None
-    assert store.consume(STATE) is None
+    assert store.consume(STATE, browser_binding_hash=BINDING_HASH, now=time.time() + 120) is None
+    assert store.consume(STATE, browser_binding_hash=BINDING_HASH) is None
 
 
 def test_encrypted_store_rejects_invalid_key_and_ephemeral_database(tmp_path):
