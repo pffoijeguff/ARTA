@@ -21,6 +21,10 @@ from typing import Protocol
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 
+def _valid_binding_hash(value: str) -> bool:
+    return isinstance(value, str) and len(value) == 64 and all(char in "0123456789abcdef" for char in value)
+
+
 @dataclass(frozen=True)
 class PendingLogin:
     verifier: str
@@ -54,7 +58,7 @@ class InMemoryPendingLoginStore:
                 raise ValueError("pending login capacity reached")
             if state in self._items:
                 raise ValueError("duplicate login state")
-            if not isinstance(browser_binding_hash, str) or len(browser_binding_hash) != 64:
+            if not _valid_binding_hash(browser_binding_hash):
                 raise ValueError("invalid browser binding digest")
             self._items[state] = PendingLogin(verifier, nonce, expires_at, browser_binding_hash)
 
