@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping
 
 from .core import (
+    MAX_TOOL_INVOCATIONS_PER_MISSION,
     Approval,
     Evidence,
     EvidenceOutcome,
@@ -78,6 +79,10 @@ class MissionPlan:
         actions = tuple(self.actions)
         if not actions:
             raise MissionError("A mission plan must contain at least one action.")
+        if len(actions) > MAX_TOOL_INVOCATIONS_PER_MISSION:
+            raise MissionError(
+                f"A mission plan may contain at most {MAX_TOOL_INVOCATIONS_PER_MISSION} actions."
+            )
         if not all(isinstance(action, PlannedAction) for action in actions):
             raise MissionError("A mission plan may contain only PlannedAction records.")
         ids = [action.action_id for action in actions]
