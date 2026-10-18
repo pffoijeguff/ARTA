@@ -5,6 +5,7 @@ reverse proxy, configure the exact public origin, and do not log callback query 
 """
 from __future__ import annotations
 
+import html
 import json
 from http.cookies import CookieError, SimpleCookie
 from typing import Callable, Iterable
@@ -80,7 +81,7 @@ class OidcWebApplication:
             ("Pragma", "no-cache"),
             ("X-Content-Type-Options", "nosniff"),
             ("Referrer-Policy", "no-referrer"),
-            ("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'"),
+            ("Content-Security-Policy", "default-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"),
             *extra,
         ]
 
@@ -95,6 +96,10 @@ class OidcWebApplication:
     def _json(self, start_response: Callable, status: str, payload: dict, extra=()):
         body = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
         return self._response(start_response, status, body, [("Content-Type", "application/json; charset=utf-8"), *extra])
+
+    def _html(self, start_response: Callable, status: str, document: str):
+        body = document.encode("utf-8")
+        return self._response(start_response, status, body, [("Content-Type", "text/html; charset=utf-8")])
 
     @staticmethod
     def _cookies(environ) -> SimpleCookie:
@@ -116,6 +121,49 @@ class OidcWebApplication:
         method = environ.get("REQUEST_METHOD", "GET").upper()
         path = environ.get("PATH_INFO", "/")
         try:
+            if path == "/":
+                if method != "GET":
+                    return self._response(start_response, "405 Method Not Allowed", extra=[("Allow", "GET")])
+                cookies = self._cookies(environ)
+                token = cookies.get(self.SESSION_COOKIE)
+                session = self._sessions.validate_session(token.value if token else "")
+                if session is None:
+                    document = """<!doctype html>
+<html lang="fa" dir="rtl">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ARTA Ω∞ — ورود امن</title></head>
+<body>
+<main>
+<header><p>ARTA Ω∞</p><h1>مرکز فرماندهی مأموریت‌ها</h1></header>
+<section aria-labelledby="welcome">
+<h2 id="welcome">به ARTA خوش آمدی</h2>
+<p>برای ادامه، با ارائه‌دهندهٔ هویت پیکربندی‌شده وارد شو.</p>
+<p><a href="/login">ورود امن با حساب کاربری</a></p>
+</section>
+<footer><p>ورود با OIDC و PKCE انجام می‌شود. ARTA تا پیش از تأیید هویت، نشست محلی ایجاد نمی‌کند.</p></footer>
+</main>
+</body></html>"""
+                else:
+                    safe_subject = html.escape(session.subject, quote=True)
+                    expiry = html.escape(str(int(session.expires_at)), quote=True)
+                    document = f"""<!doctype html>
+<html lang="fa" dir="rtl">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ARTA Ω∞ — نشست فعال</title></head>
+<body>
+<main>
+<header><p>ARTA Ω∞</p><h1>نشست امن فعال است</h1></header>
+<section aria-labelledby="account">
+<h2 id="account">حساب واردشده</h2>
+<p><b>شناسهٔ کاربر:</b> <code>{safe_subject}</code></p>
+<p><b>انقضای نشست (Unix timestamp):</b> <time>{expiry}</time></p>
+<form action="/logout" method="post"><button type="submit">خروج امن</button></form>
+</section>
+<p><a href="/session">نمایش وضعیت نشست به‌صورت JSON</a></p>
+</main>
+</body></html>"""
+                return self._html(start_response, "200 OK", document)
+
             if path == "/login":
                 if method != "GET":
                     return self._json(start_response, "405 Method Not Allowed", {"error": "method_not_allowed"}, [("Allow", "GET")])
