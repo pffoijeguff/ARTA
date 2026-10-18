@@ -70,6 +70,7 @@ This repository is not yet a security-certified product. The security document d
 
 - [Architecture](docs/ARCHITECTURE.md) — components, contracts, mission state machine, and data flow.
 - [Security Model](docs/SECURITY_MODEL.md) — trust boundaries, permissions, threat scenarios, and required controls.
+- [Secure Runtime Composition](docs/RUNTIME_COMPOSITION.md) — trusted identity, approval, sandbox, and mission-runner wiring.
 - [Acceptance Tests](docs/ACCEPTANCE_TESTS.md) — observable conditions that future implementation must satisfy.
 - [Roadmap](docs/ROADMAP.md) — staged delivery with explicit exit criteria.
 - [Architecture Decisions](docs/DECISIONS.md) — durable principles and the reasoning behind them.
