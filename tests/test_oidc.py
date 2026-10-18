@@ -90,15 +90,17 @@ def test_unknown_kid_after_refresh_is_rejected():
 
 
 def test_private_jwk_material_is_rejected():
-    _private, jwk = _key_pair()
+    private, jwk = _key_pair()
+    auth = _auth(lambda _url, _timeout: _document({**jwk, "d": "must-not-appear"}))
     with pytest.raises(IdentityError, match="private"):
-        _auth(lambda _url, _timeout: _document({**jwk, "d": "must-not-appear"})).authenticate("not-a-token")
+        auth.authenticate(_token(private))
 
 
 def test_malformed_jwks_is_rejected():
+    private, _jwk = _key_pair()
     auth = _auth(lambda _url, _timeout: b'{"keys": "not-an-array"}')
     with pytest.raises(IdentityError, match="keys array"):
-        auth.authenticate("not-a-token")
+        auth.authenticate(_token(private))
 
 
 def test_token_selected_algorithm_is_not_trusted():
