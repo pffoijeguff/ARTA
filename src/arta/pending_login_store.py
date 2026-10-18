@@ -6,7 +6,6 @@ PKCE verifier/nonce material; it is not a browser-session store.
 """
 from __future__ import annotations
 
-import hashlib
 import hmac
 import json
 import os
@@ -116,7 +115,7 @@ class EncryptedSQLitePendingLoginStore:
         if not isinstance(state, str) or not state or len(state) > cls._MAX_STATE_LENGTH:
             raise ValueError("invalid login state")
 
-    def put(self, state: str, verifier: str, nonce: str, expires_at: float) -> None:
+    def put(self, state: str, verifier: str, nonce: str, expires_at: float, browser_binding_hash: str) -> None:
         self._validate_state(state)
         if not isinstance(verifier, str) or not verifier or len(verifier) > 256:
             raise ValueError("invalid PKCE verifier")
