@@ -241,7 +241,7 @@ class MissionRunner:
                 reason="Plan criteria do not exactly cover the mission acceptance criteria.",
             )
 
-        pending: list[str] = []
+        pending_actions: list[tuple[PlannedAction, object]] = []
         denied: list[str] = []
         for action in plan.actions:
             stopped = self._stop_report(mission, mission_control)
@@ -254,9 +254,11 @@ class MissionRunner:
                 approval=approval,
             )
             if decision.effect is PolicyEffect.REQUIRE_APPROVAL:
-                pending.append(action.action_id)
+                pending_actions.append((action, decision))
             elif decision.effect is PolicyEffect.DENY:
                 denied.append(action.action_id)
+
+        pending = [action.action_id for action, _decision in pending_actions]
 
         stopped = self._stop_report(mission, mission_control)
         if stopped is not None:
@@ -274,6 +276,15 @@ class MissionRunner:
         if pending:
             if mission.state is MissionState.PLANNED:
                 mission.transition(MissionState.AWAITING_APPROVAL, "Plan contains actions awaiting approval.")
+            for action, decision in pending_actions:
+                fingerprint = decision.action_fingerprint or ""
+                if not self._gateway._has_pending_approval(mission, action.tool_name, fingerprint):
+                    mission.record("tool.approval_requested", {
+                        "action_id": action.action_id,
+                        "tool": action.tool_name,
+                        "action_fingerprint": fingerprint,
+                        "reason": decision.reason,
+                    })
             self._checkpoint(mission)
             return MissionRunReport(
                 mission_id=mission.mission_id,
