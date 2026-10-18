@@ -1,6 +1,6 @@
 # ARTA Ω∞
 
-[![Documentation checks](https://github.com/pffoijeguff/ARTA/actions/workflows/docs-check.yml/badge.svg)](https://github.com/pffoijeguff/ARTA/actions/workflows/docs-check.yml)
+[![Documentation checks](https://github.com/pffoijeguff/ARTA/actions/workflows/docs-check.yml/badge.svg)](https://github.com/pffoijeguff/ARTA/actions/workflows/docs-check.yml)\n[![Bubblewrap integration](https://github.com/pffoijeguff/ARTA/actions/workflows/sandbox-integration.yml/badge.svg)](https://github.com/pffoijeguff/ARTA/actions/workflows/sandbox-integration.yml)
 
 **A Persian-first, local-first AI operating layer for turning missions into verified outcomes.**
 
@@ -64,7 +64,7 @@ These are architecture targets. See [Architecture](docs/ARCHITECTURE.md) and [Se
 
 ARTA is intended to treat all model output, external content, and tool output as potentially untrusted. Policy decisions must be enforced outside the model. High-impact actions require appropriate human approval, secrets must not be committed or casually logged, and integrations must use authorized interfaces.
 
-This repository is not yet a security-certified product. The security document defines intended controls and the [acceptance-test plan](docs/ACCEPTANCE_TESTS.md) describes how they should be checked as implementation begins.
+This repository is not yet a security-certified product. A dedicated real-host Bubblewrap workflow tests network and host-write isolation on its configured GitHub Actions runner; deployment-specific validation and a production identity-provider lifecycle remain open. The [acceptance-test plan](docs/ACCEPTANCE_TESTS.md) records these gates and their limits.
 
 ## Repository map
 

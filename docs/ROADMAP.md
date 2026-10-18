@@ -6,7 +6,7 @@ The project should advance through a few meaningful milestones. Each milestone h
 
 ## Progress snapshot — 2026-10-18
 
-The Python kernel includes structured evidence, action-bound approvals, SQLite persistence and recovery, cooperative cancellation, and allowlisted workspace writes. The latest security slice adds configured-key JWT validation and trusted scope-based approval issuance, plus a Linux BubblewrapSandbox that launches allowlisted processes with private tmpfs workspace, no network namespace sharing, and bounded resources. The full product is still a prototype: no login/token-acquisition UI, automatic safe resumption, encrypted storage, interruptible real adapters, real connector runtime, or production Command Center is delivered. Real Bubblewrap integration testing is opt-in and is still a deployment release gate.
+The Python kernel includes structured evidence, action-bound approvals, SQLite persistence and recovery, cooperative cancellation, and allowlisted workspace writes. The latest security slice adds configured-key JWT validation and trusted scope-based approval issuance, plus a Linux BubblewrapSandbox that launches allowlisted processes with private tmpfs workspace, no network namespace sharing, and bounded resources. The full product is still a prototype: no login/token-acquisition UI, automatic safe resumption, encrypted storage, interruptible real adapters, real connector runtime, or production Command Center is delivered. A dedicated real-host Bubblewrap CI workflow now runs the host-write/network isolation test on Ubuntu 24.04; deployment-specific validation remains required. The login/token-acquisition service and production identity lifecycle are still not delivered.
 
 ## M0 — Project foundation and contracts
 
@@ -171,3 +171,18 @@ The checklist above is not a claim that any milestone is complete. Update milest
 **Implemented:** `register_sandbox_tool` provides an explicit, approval-gated bridge from ToolGateway to BubblewrapSandbox. The executable alias is a policy target; argv is validated as a JSON string array; command exit status, timeout and output truncation are returned as structured data. Unit tests confirm unapproved actions do not reach the sandbox adapter and unknown aliases are denied before execution.
 
 **Remaining release gates:** This is not a global wrapper for arbitrary in-process callbacks. Runtime composition must use the real BubblewrapSandbox, a configured approval verifier and a trusted authenticated approval issuer. The opt-in real-host namespace/network/write-isolation test and deployment threat review remain required; production authentication lifecycle, real adapters, and end-to-end acceptance remain open.
+
+
+## Real-host sandbox validation — 2026-10-18
+
+**Added:** A dedicated GitHub Actions workflow installs Bubblewrap on Ubuntu 24.04 and runs
+the opt-in integration test explicitly. Missing Bubblewrap or unavailable user namespaces are
+a failed release gate rather than a silently skipped test. The test verifies real sandbox
+startup, blocked network access, absence of a host-visible marker write, and unchanged source
+workspace.
+
+**Exit condition:** The workflow must pass on the exact revision, and the same test must pass
+on every supported deployment class. A hosted runner result is not a universal Linux isolation
+certification. A real identity-provider login/token acquisition and operational key-rotation/
+revocation lifecycle remain separate requirements; no credentials or external provider have
+been assumed or fabricated.
