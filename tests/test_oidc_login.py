@@ -12,6 +12,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 
 from arta import IdentityError, OidcJwksAuthenticator
 from arta.oidc_login import OidcAuthorizationCodeClient
+from arta.pending_login_store import EncryptedSQLitePendingLoginStore
 
 ISSUER = "https://id.example.test/"
 CLIENT_ID = "arta-web"
@@ -44,7 +45,7 @@ def _id_token(private, nonce):
                       private, algorithm="RS256", headers={"kid": "login-key"})
 
 
-def _client(auth, exchange):
+def _client(auth, exchange, pending_store=None):
     return OidcAuthorizationCodeClient(
         authorization_endpoint="https://id.example.test/authorize",
         token_endpoint="https://id.example.test/token",
@@ -52,6 +53,7 @@ def _client(auth, exchange):
         redirect_uri="https://app.example.test/oidc/callback",
         authenticator=auth,
         token_exchange=exchange,
+        pending_store=pending_store,
     )
 
 
@@ -127,3 +129,32 @@ def test_pkce_rejects_unsafe_token_endpoint(endpoint):
             authenticator=auth,
             token_exchange=lambda *_args: b"{}",
         )
+
+
+
+def test_pkce_transaction_can_be_completed_by_another_worker(tmp_path):
+    private, auth = _setup()
+    path = tmp_path / "shared-login.sqlite3"
+    key = b"\x33" * 32
+    first_store = EncryptedSQLitePendingLoginStore(path, key)
+    second_store = EncryptedSQLitePendingLoginStore(path, key)
+    first_client = _client(auth, lambda *_args: b"{}", pending_store=first_store)
+    start = first_client.begin_login()
+    params = parse_qs(urlsplit(start.authorization_url).query)
+    nonce = params["nonce"][0]
+    second_client = _client(
+        auth,
+        lambda _url, _fields, _timeout: json.dumps({
+            "id_token": _id_token(private, nonce),
+            "access_token": "shared-worker-access-token",
+            "token_type": "Bearer",
+            "expires_in": 600,
+        }).encode(),
+        pending_store=second_store,
+    )
+
+    result = second_client.complete_login(code="worker-shared-code", state=start.state)
+    assert result.principal.subject == "user-42"
+    assert result.principal.scopes == frozenset()
+    with pytest.raises(IdentityError, match="state"):
+        first_client.complete_login(code="worker-shared-code", state=start.state)

@@ -26,6 +26,7 @@ from .workspace import WorkspaceAdapter, WorkspaceError
 from .identity import AuthenticatedPrincipal, IdentityError, JwtPrincipalAuthenticator, PrincipalAuthenticator, TrustedApprovalService
 from .oidc import OidcJwksAuthenticator
 from .oidc_login import LoginStart, OidcAuthorizationCodeClient, OidcLoginResult
+from .pending_login_store import EncryptedSQLitePendingLoginStore, InMemoryPendingLoginStore, PendingLogin, PendingLoginStore
 from .sandbox import BubblewrapSandbox, SandboxError, SandboxResult
 from .sandbox_tool import register_sandbox_tool
 from .runtime import SecureRuntime
@@ -63,6 +64,10 @@ __all__ = [
     "LoginStart",
     "OidcAuthorizationCodeClient",
     "OidcLoginResult",
+    "EncryptedSQLitePendingLoginStore",
+    "InMemoryPendingLoginStore",
+    "PendingLogin",
+    "PendingLoginStore",
     "TrustedApprovalService",
     "BubblewrapSandbox",
     "SandboxError",
