@@ -82,16 +82,14 @@ At minimum: approval ID, mission ID, proposed action, normalized target, relevan
 
 ## 7. Workspace and tool isolation
 
-Before enabling arbitrary filesystem writes or process execution, implementation must include:
-- explicit workspace roots and robust canonical-path checks;
-- traversal and symlink-escape tests;
-- process, time, output-size, and resource limits;
-- a minimal environment and no ambient credentials;
-- an allowlist for executables and arguments if process execution is ever enabled;
-- a defined network egress policy;
-- cancellation and cleanup behavior for timed-out work.
+The optional `WorkspaceAdapter` now provides a narrow filesystem boundary: exact relative-path allowlists, no delete/list/shell capability, traversal and symlink-component rejection, UTF-8 and size limits, compare-before-write via the exact prior SHA-256, temporary-file staging, atomic replacement, and before/after digests. The write tool is registered as non-read-only and requires action-bound approval through the Authority Kernel. Tests exercise path traversal, symlinked paths, stale-write conflicts, oversized/binary files, and write-failure cleanup.
 
-A workspace path check is not a substitute for an OS-level sandbox.
+Residual limits:
+- This is not an OS sandbox; same-user hostile processes and all filesystem TOCTOU races are not eliminated.
+- The configured root and allowed paths are trusted configuration. Do not include user-controlled arbitrary paths in that allowlist.
+- No delete, directory listing, shell, process launch, or network capability is exposed.
+- The caller must authenticate the approver and configure a trusted approval verifier; a path allowlist alone does not authorize a write.
+- Production still requires OS-level isolation, resource limits, protected credentials, and real-adapter cancellation semantics.
 
 ## 8. Auditability and incident handling
 

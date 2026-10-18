@@ -135,6 +135,24 @@ with SQLiteMissionStore("arta.sqlite3") as store:
 
 Persist an approval through the trusted application boundary with `store.put_approval(approval)`; revocation is recorded with `store.revoke_approval(approval_id, actor_id=..., reason=...)`. When a plan carries an approval and a store is configured, the runner reloads the latest stored status instead of trusting a stale in-memory approval object. The store is an early persistence layer, not an identity provider or encrypted secret vault.
 
+### Allowlisted workspace reads and writes
+
+The optional `WorkspaceAdapter` exposes only explicitly allowlisted UTF-8 files. Reads return a SHA-256 digest; writes are approval-gated through `ToolGateway`, create new files only when absent, and replace existing files only when the caller supplies the exact prior `expected_sha256`. Writes use a sibling temporary file and atomic replacement, enforce a 64 KiB default limit, reject traversal and symlinked path components, and report before/after digests.
+
+```python
+from arta.core import AuthorityKernel, ToolGateway
+from arta.workspace import WorkspaceAdapter
+
+gateway = ToolGateway(AuthorityKernel(approval_verifier=trusted_approval_verifier))
+workspace = WorkspaceAdapter(
+    "./workspace",
+    allowed_paths=("reports/draft.md", "reports/final.md"),
+)
+workspace.register(gateway)
+```
+
+The application must authenticate the approver and provide a trusted approval verifier. This adapter is not an OS sandbox and does not protect against every hostile same-user process or filesystem race. It intentionally has no delete, directory-listing, shell, or arbitrary-path operation.
+
 ### Deadlines and cooperative cancellation
 
 A mission can accept an overall timeout and a cancellation token:

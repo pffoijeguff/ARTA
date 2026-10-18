@@ -237,3 +237,10 @@ Persistence does not yet provide a transactional boundary around an external sid
 MissionRunner accepts an optional overall timeout and CancellationToken. Each ToolSpec may define a narrower timeout. ToolGateway creates a child ExecutionControl whose monotonic deadline cannot extend the mission deadline; child controls share the same thread-safe cancellation token. The state model distinguishes cancellation from a runtime failure with a terminal CANCELLED state.
 
 Context-aware tools are registered with contextual_handler(arguments, control) and should poll control.raise_if_stopped() during long work. Ordinary one-argument handlers are checked before and after the callback but cannot be interrupted while blocked inside arbitrary synchronous code. A callback can therefore complete an external effect after cancellation/deadline; that action is recorded as unknown, and no automatic retry occurs. Deadlines and cancellation are best-effort execution controls, not an operating-system sandbox or rollback mechanism.
+
+
+## 12. Allowlisted workspace adapter
+
+The optional `WorkspaceAdapter` is the first controlled filesystem-write slice. It exposes only exact relative paths supplied at construction, registers a read-only tool and a non-read-only write tool, and delegates authorization/approval checks to `ToolGateway`. The adapter rejects absolute paths, traversal, backslashes, symlink components, non-regular files, invalid UTF-8, and files above the configured 64 KiB ceiling. A replacement requires the exact current SHA-256; a new file must not already exist. Writes are staged in a sibling temporary file, flushed, and atomically replaced, with before/after hashes returned for independent verification.
+
+The adapter does not expose deletion, directory enumeration, shell execution, or arbitrary paths. Path checks and atomic replacement are defense in depth, not an OS sandbox; a hostile process running as the same user may still race filesystem operations. Production use requires OS-level isolation and a separately authenticated approval boundary.

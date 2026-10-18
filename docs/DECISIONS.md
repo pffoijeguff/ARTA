@@ -115,3 +115,12 @@ This file records durable design choices. A decision may be revised, but changes
 **Reason:** Python cannot safely kill an arbitrary running thread, and pretending that a timeout can reverse an external side effect would make retry behavior unsafe.
 
 **Consequences:** The prototype provides deterministic cancellation boundaries for cooperative tools and can distinguish CANCELLED from FAILED. Hard interruption, process isolation, interruptible adapters, external-effect reconciliation, and rollback remain adapter/platform responsibilities.
+
+
+## ADR-010: Allowlist-only workspace writes
+
+**Decision:** Introduce a narrowly scoped workspace adapter before arbitrary connectors or process execution. It operates only on exact relative paths configured by the trusted application, rejects traversal and symlinked components, limits UTF-8 payload sizes, and requires the current file digest before replacement. The write tool remains non-read-only and approval-gated.
+
+**Rationale:** A constrained, auditable write capability tests the complete policy → approval → tool → before/after verification path without granting arbitrary filesystem or shell access.
+
+**Consequences:** The adapter improves defense in depth but is not an OS sandbox and cannot claim complete protection from hostile same-user races. OS-level containment, authenticated identities, and real-adapter cancellation remain release blockers.

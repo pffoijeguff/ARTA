@@ -6,7 +6,7 @@ The project should advance through a few meaningful milestones. Each milestone h
 
 ## Progress snapshot — 2026-10-18
 
-The Python kernel now includes structured evidence, action-bound approvals, strict tool contracts, a MissionRunner, SQLite persistence, a durable action journal, cooperative cancellation/deadlines, and conservative post-restart reconciliation. Recovery marks interrupted actions and blocks non-terminal missions for review; it does not resume lost plans. Authenticated identities, an OS sandbox, interruptible real adapters, encrypted storage, automatic safe resumption, and the real UI remain open.
+The Python kernel now includes structured evidence, action-bound approvals, strict tool contracts, a MissionRunner, SQLite persistence, a durable action journal, cooperative cancellation/deadlines, conservative post-restart reconciliation, and an allowlisted workspace adapter with compare-before-write semantics. Recovery marks interrupted actions and blocks non-terminal missions for review; it does not resume lost plans. Authenticated identities, an OS sandbox, interruptible real adapters, encrypted storage, automatic safe resumption, and the real UI remain open.
 
 ## M0 — Project foundation and contracts
 
@@ -139,3 +139,10 @@ The checklist above is not a claim that any milestone is complete. Update milest
 **Delivered:** An explicit recovery entry point loads a mission snapshot and its durable action journal, changes a stranded `started` action to `unknown`, classifies a stranded `prepared` action as interrupted before handler entry, records a recovery-required event, and transitions non-terminal missions to `BLOCKED`. It never invokes an action during recovery. Tests cover ambiguous side effects, pre-start interruption, idempotent repeat recovery, and the no-store boundary.
 
 **Boundary:** This is safe stop-and-review behavior, not automatic resumption. The plan and raw tool results are not durably stored, so ARTA must not claim it can resume the exact interrupted execution. A future resumable design needs versioned serialized plans, artifact/result retention policy, idempotency/reconciliation contracts, and explicit human decisions for uncertain external effects.
+
+
+## Controlled workspace-write milestone — 2026-10-18
+
+**Delivered:** An optional allowlist-only workspace adapter with bounded UTF-8 reads, exact-path policy contracts, traversal/symlink checks, create-only semantics for new files, compare-before-write for replacements, temporary-file staging, atomic replacement, and before/after SHA-256 evidence. The write capability is registered as non-read-only and remains behind the Authority Kernel's exact-action approval gate. Tests cover signed-approval replay resistance, stale-write conflicts, symlinked paths, size limits, and failure cleanup.
+
+**Boundary:** This is a narrow local adapter, not an OS sandbox. It exposes no delete, directory listing, shell, arbitrary path, or process launch. Authenticated approver identity, protection from hostile same-user filesystem races, and production-grade OS isolation remain open.
