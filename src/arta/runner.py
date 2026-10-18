@@ -16,6 +16,7 @@ from .core import (
     Mission,
     MissionError,
     MissionState,
+    PolicyDecision,
     PolicyEffect,
     ToolGateway,
     ToolResult,
@@ -241,7 +242,7 @@ class MissionRunner:
                 reason="Plan criteria do not exactly cover the mission acceptance criteria.",
             )
 
-        pending_actions: list[tuple[PlannedAction, object]] = []
+        pending_actions: list[tuple[PlannedAction, PolicyDecision]] = []
         denied: list[str] = []
         for action in plan.actions:
             stopped = self._stop_report(mission, mission_control)
