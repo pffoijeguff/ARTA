@@ -96,7 +96,7 @@ def test_pkce_state_is_single_use_and_unknown_state_never_exchanges_code():
         client.complete_login(code="authorization-code", state=start.state, browser_binding=start.browser_binding_cookie_value)
     assert calls == [True]
     with pytest.raises(IdentityError, match="state"):
-        client.complete_login(code="authorization-code", state=start.state)
+        client.complete_login(code="authorization-code", state=start.state, browser_binding=start.browser_binding_cookie_value)
     assert calls == [True]
 
 
@@ -108,9 +108,9 @@ def test_pkce_login_rejects_id_token_with_wrong_nonce():
     }).encode())
     start = client.begin_login()
     with pytest.raises(IdentityError, match="nonce"):
-        client.complete_login(code="authorization-code", state=start.state)
+        client.complete_login(code="authorization-code", state=start.state, browser_binding=start.browser_binding_cookie_value)
     with pytest.raises(IdentityError, match="state"):
-        client.complete_login(code="authorization-code", state=start.state)
+        client.complete_login(code="authorization-code", state=start.state, browser_binding=start.browser_binding_cookie_value)
 
 
 @pytest.mark.parametrize("endpoint", [
