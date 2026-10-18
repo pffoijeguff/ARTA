@@ -126,7 +126,7 @@ class OidcAuthorizationCodeClient:
         self._exchange = token_exchange or _post_token_form
         # Memory is convenient for tests/single-process development. Multi-worker deployments
         # should inject EncryptedSQLitePendingLoginStore (or another atomic protected store).
-        self._pending_store = pending_store or InMemoryPendingLoginStore(max_entries=1024)
+        self._pending_store = pending_store if pending_store is not None else InMemoryPendingLoginStore(max_entries=1024)
 
     @staticmethod
     def _random_urlsafe(size: int = 32) -> str:
