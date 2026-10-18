@@ -180,9 +180,15 @@ def test_real_bubblewrap_blocks_host_writes_and_network(tmp_path) -> None:
     workspace.mkdir()
     (workspace / "input.txt").write_text("fixture", encoding="utf-8")
     marker = Path("/tmp") / f"arta-sandbox-host-marker-{os.getpid()}.txt"
-    python = shutil.which("python3")
+    # Use the OS-managed interpreter under a read-only runtime root. setup-python may
+    # prepend /opt/hostedtoolcache to PATH, which is intentionally not mounted in sandbox.
+    python = next(
+        (candidate for candidate in ("/usr/bin/python3", "/bin/python3")
+         if Path(candidate).is_file() and os.access(candidate, os.X_OK)),
+        None,
+    )
     if not python:
-        pytest.skip("python3 executable was not found.")
+        pytest.fail("No OS-managed python3 exists under /usr or /bin for the real sandbox test.")
     sandbox = BubblewrapSandbox(
         workspace,
         allowed_executables={"python": python},
