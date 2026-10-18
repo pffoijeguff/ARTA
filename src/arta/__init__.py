@@ -1,4 +1,5 @@
 """ARTA mission kernel vertical slice."""
+from .approvals import HmacApprovalAuthority
 from .core import (
     Approval,
     ApprovalStatus,
@@ -23,6 +24,7 @@ from .runner import MissionPlan, MissionRunReport, MissionRunner, PlannedAction
 from .persistence import SQLiteMissionStore, StoreError, StoreIntegrityError
 
 __all__ = [
+    "HmacApprovalAuthority",
     "Approval",
     "CancellationToken",
     "ExecutionCancelled",
