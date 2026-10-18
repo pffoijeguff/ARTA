@@ -7,11 +7,11 @@ PKCE verifier/nonce material; it is not a browser-session store.
 from __future__ import annotations
 
 import json
-from contextlib import closing
 import os
 import secrets
 import sqlite3
 import threading
+from contextlib import closing
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -133,7 +133,7 @@ class EncryptedSQLitePendingLoginStore:
     def consume(self, state: str, *, now: float | None = None) -> PendingLogin | None:
         self._validate_state(state)
         current = time.time() if now is None else now
-        with self._lock, self._connect() as db:
+        with self._lock, closing(self._connect()) as db:
             db.execute("BEGIN IMMEDIATE")
             try:
                 row = db.execute("SELECT expires_at, nonce, ciphertext FROM pending_oidc_login WHERE state = ?", (state,)).fetchone()
