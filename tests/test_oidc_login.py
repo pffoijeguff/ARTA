@@ -89,9 +89,12 @@ def test_pkce_state_is_single_use_and_unknown_state_never_exchanges_code():
     with pytest.raises(IdentityError, match="state"):
         client.complete_login(code="authorization-code", state="wrong-state")
     assert calls == []
+    with pytest.raises(IdentityError, match="ID token"):
+        client.complete_login(code="authorization-code", state=start.state)
+    assert calls == [True]
     with pytest.raises(IdentityError, match="state"):
         client.complete_login(code="authorization-code", state=start.state)
-    assert calls == []
+    assert calls == [True]
 
 
 def test_pkce_login_rejects_id_token_with_wrong_nonce():
