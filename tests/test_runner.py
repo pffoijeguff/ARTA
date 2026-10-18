@@ -31,6 +31,83 @@ def passing_verifier(action: PlannedAction, result):
     return EvidenceOutcome.PASS, f"Independent fixture check passed for {action.action_id}."
 
 
+def test_restart_recovery_marks_started_action_unknown_and_never_replays_it(tmp_path) -> None:
+    mission = Mission("Publish a report", ("report-published",))
+    mission.transition(MissionState.PLANNED)
+    mission.transition(MissionState.RUNNING)
+    fingerprint = "a" * 64
+
+    with SQLiteMissionStore(tmp_path / "recovery.sqlite3") as store:
+        store.save_mission(mission)
+        store.record_action_event(
+            mission.mission_id, "publish-1", "report.publish", fingerprint, "prepared"
+        )
+        store.record_action_event(
+            mission.mission_id, "publish-1", "report.publish", fingerprint, "started"
+        )
+
+        calls: list[str] = []
+        gateway = ToolGateway(AuthorityKernel(clock=lambda: NOW))
+        gateway.register(ToolSpec(
+            "report.publish",
+            lambda args: calls.append("called") or {"ok": True},
+            read_only=False,
+            allowed_arguments=("target",),
+            required_arguments=("target",),
+            target_argument="target",
+            allowed_targets=("reports/final.md",),
+        ))
+        recovered = MissionRunner(gateway, store).recover_interrupted_mission(mission.mission_id)
+
+        assert recovered is not None
+        assert recovered.recovered is True
+        assert recovered.previous_state is MissionState.RUNNING
+        assert recovered.state is MissionState.BLOCKED
+        assert recovered.requires_human_review is True
+        assert recovered.uncertain_action_ids == ("publish-1",)
+        journal = store.action_journal(mission.mission_id)
+        assert journal[0]["status"] == "unknown"
+        assert journal[0]["error_type"] == "ProcessRestartDuringAction"
+        loaded = store.load_mission(mission.mission_id)
+        assert loaded is not None and loaded.state is MissionState.BLOCKED
+        assert any(e.event_type == "mission.recovery_required" for e in loaded.audit)
+        assert calls == []
+
+        # A second recovery is a no-op; it cannot execute the uncertain action.
+        second = MissionRunner(gateway, store).recover_interrupted_mission(mission.mission_id)
+        assert second is not None and second.recovered is False
+        assert second.uncertain_action_ids == ("publish-1",)
+        assert calls == []
+
+
+def test_restart_recovery_resolves_prepared_action_as_not_started(tmp_path) -> None:
+    mission = Mission("Prepare a report", ("report-prepared",))
+    mission.transition(MissionState.PLANNED)
+    mission.transition(MissionState.RUNNING)
+    fingerprint = "b" * 64
+
+    with SQLiteMissionStore(tmp_path / "prepared-recovery.sqlite3") as store:
+        store.save_mission(mission)
+        store.record_action_event(
+            mission.mission_id, "prepare-1", "report.prepare", fingerprint, "prepared"
+        )
+        recovered = MissionRunner(ToolGateway(), store).recover_interrupted_mission(mission.mission_id)
+
+        assert recovered is not None
+        assert recovered.state is MissionState.BLOCKED
+        assert recovered.resolved_before_start_action_ids == ("prepare-1",)
+        assert recovered.uncertain_action_ids == ()
+        journal = store.action_journal(mission.mission_id)
+        assert journal[0]["status"] == "failed"
+        assert journal[0]["error_type"] == "ProcessInterruptedBeforeStart"
+        assert store.unresolved_actions(mission.mission_id) == ()
+
+
+def test_restart_recovery_refuses_to_guess_without_persistent_store() -> None:
+    with pytest.raises(MissionError, match="SQLiteMissionStore"):
+        MissionRunner(ToolGateway()).recover_interrupted_mission("mission-1")
+
+
 def test_mission_plan_rejects_more_actions_than_the_execution_budget() -> None:
     actions = tuple(
         PlannedAction(f"action-{index}", "report.read", "report-read")
