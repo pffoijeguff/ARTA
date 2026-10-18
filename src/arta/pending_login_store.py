@@ -6,6 +6,7 @@ PKCE verifier/nonce material; it is not a browser-session store.
 """
 from __future__ import annotations
 
+import hmac
 import json
 import os
 import secrets
@@ -20,18 +21,23 @@ from typing import Protocol
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 
+def _valid_binding_hash(value: str) -> bool:
+    return isinstance(value, str) and len(value) == 64 and all(char in "0123456789abcdef" for char in value)
+
+
 @dataclass(frozen=True)
 class PendingLogin:
     verifier: str
     nonce: str
     expires_at: float
+    browser_binding_hash: str
 
 
 class PendingLoginStore(Protocol):
     """Atomic, single-use transaction storage. Times are Unix epoch seconds."""
 
-    def put(self, state: str, verifier: str, nonce: str, expires_at: float) -> None: ...
-    def consume(self, state: str, *, now: float | None = None) -> PendingLogin | None: ...
+    def put(self, state: str, verifier: str, nonce: str, expires_at: float, browser_binding_hash: str) -> None: ...
+    def consume(self, state: str, *, browser_binding_hash: str, now: float | None = None) -> PendingLogin | None: ...
 
 
 class InMemoryPendingLoginStore:
@@ -44,7 +50,7 @@ class InMemoryPendingLoginStore:
         self._items: dict[str, PendingLogin] = {}
         self._lock = threading.RLock()
 
-    def put(self, state: str, verifier: str, nonce: str, expires_at: float) -> None:
+    def put(self, state: str, verifier: str, nonce: str, expires_at: float, browser_binding_hash: str) -> None:
         with self._lock:
             now = time.time()
             self._items = {k: v for k, v in self._items.items() if v.expires_at > now}
@@ -52,15 +58,25 @@ class InMemoryPendingLoginStore:
                 raise ValueError("pending login capacity reached")
             if state in self._items:
                 raise ValueError("duplicate login state")
-            self._items[state] = PendingLogin(verifier, nonce, expires_at)
+            if not _valid_binding_hash(browser_binding_hash):
+                raise ValueError("invalid browser binding digest")
+            self._items[state] = PendingLogin(verifier, nonce, expires_at, browser_binding_hash)
 
-    def consume(self, state: str, *, now: float | None = None) -> PendingLogin | None:
+    def consume(self, state: str, *, browser_binding_hash: str, now: float | None = None) -> PendingLogin | None:
+        if not _valid_binding_hash(browser_binding_hash):
+            raise ValueError("invalid browser binding digest")
         with self._lock:
-            transaction = self._items.pop(state, None)
+            transaction = self._items.get(state)
             if transaction is None:
                 return None
             current = time.time() if now is None else now
-            return transaction if transaction.expires_at > current else None
+            if transaction.expires_at <= current:
+                self._items.pop(state, None)
+                return None
+            if not hmac.compare_digest(transaction.browser_binding_hash, browser_binding_hash):
+                return None
+            self._items.pop(state, None)
+            return transaction
 
 
 class EncryptedSQLitePendingLoginStore:
@@ -105,7 +121,7 @@ class EncryptedSQLitePendingLoginStore:
         if not isinstance(state, str) or not state or len(state) > cls._MAX_STATE_LENGTH:
             raise ValueError("invalid login state")
 
-    def put(self, state: str, verifier: str, nonce: str, expires_at: float) -> None:
+    def put(self, state: str, verifier: str, nonce: str, expires_at: float, browser_binding_hash: str) -> None:
         self._validate_state(state)
         if not isinstance(verifier, str) or not verifier or len(verifier) > 256:
             raise ValueError("invalid PKCE verifier")
@@ -113,7 +129,12 @@ class EncryptedSQLitePendingLoginStore:
             raise ValueError("invalid OIDC nonce")
         if isinstance(expires_at, bool) or not isinstance(expires_at, (int, float)) or expires_at <= time.time():
             raise ValueError("transaction expiry must be in the future")
-        payload = json.dumps({"verifier": verifier, "nonce": nonce}, separators=(",", ":")).encode("utf-8")
+        if not isinstance(browser_binding_hash, str) or len(browser_binding_hash) != 64:
+            raise ValueError("invalid browser binding digest")
+        payload = json.dumps(
+            {"verifier": verifier, "nonce": nonce, "browser_binding_hash": browser_binding_hash},
+            separators=(",", ":"),
+        ).encode("utf-8")
         iv = secrets.token_bytes(12)
         ciphertext = self._cipher.encrypt(iv, payload, state.encode("utf-8"))
         with self._lock, closing(self._connect()) as db:
@@ -130,31 +151,47 @@ class EncryptedSQLitePendingLoginStore:
                 db.execute("ROLLBACK")
                 raise
 
-    def consume(self, state: str, *, now: float | None = None) -> PendingLogin | None:
+    def consume(
+        self, state: str, *, browser_binding_hash: str, now: float | None = None
+    ) -> PendingLogin | None:
         self._validate_state(state)
-        current = time.time() if now is None else now
+        if not isinstance(browser_binding_hash, str) or len(browser_binding_hash) != 64:
+            raise ValueError("invalid browser binding digest")
         with self._lock, closing(self._connect()) as db:
             db.execute("BEGIN IMMEDIATE")
             try:
-                row = db.execute("SELECT expires_at, nonce, ciphertext FROM pending_oidc_login WHERE state = ?", (state,)).fetchone()
+                row = db.execute(
+                    "SELECT expires_at, nonce, ciphertext FROM pending_oidc_login WHERE state = ?",
+                    (state,),
+                ).fetchone()
                 if row is None:
+                    db.execute("COMMIT")
+                    return None
+                expires_at, iv, ciphertext = row
+                current = time.time() if now is None else now
+                if expires_at <= current:
+                    db.execute("DELETE FROM pending_oidc_login WHERE state = ?", (state,))
+                    db.execute("COMMIT")
+                    return None
+                try:
+                    plaintext = self._cipher.decrypt(iv, ciphertext, state.encode("utf-8"))
+                    payload = json.loads(plaintext.decode("utf-8"))
+                    verifier = payload["verifier"]
+                    nonce = payload["nonce"]
+                    stored_binding_hash = payload["browser_binding_hash"]
+                    if not all(isinstance(v, str) for v in (verifier, nonce, stored_binding_hash)):
+                        raise ValueError("invalid encrypted transaction payload")
+                except Exception:
+                    db.execute("DELETE FROM pending_oidc_login WHERE state = ?", (state,))
+                    db.execute("COMMIT")
+                    raise ValueError("pending login transaction failed authenticated decryption") from None
+                if not hmac.compare_digest(stored_binding_hash, browser_binding_hash):
                     db.execute("COMMIT")
                     return None
                 db.execute("DELETE FROM pending_oidc_login WHERE state = ?", (state,))
                 db.execute("COMMIT")
             except Exception:
-                db.execute("ROLLBACK")
+                if db.in_transaction:
+                    db.execute("ROLLBACK")
                 raise
-        expires_at, iv, ciphertext = row
-        if expires_at <= current:
-            return None
-        try:
-            plaintext = self._cipher.decrypt(iv, ciphertext, state.encode("utf-8"))
-            payload = json.loads(plaintext.decode("utf-8"))
-            verifier, nonce = payload["verifier"], payload["nonce"]
-            if not isinstance(verifier, str) or not isinstance(nonce, str):
-                raise ValueError("invalid encrypted transaction payload")
-        except Exception:
-            # State is already consumed. Fail closed on wrong keys, corruption or tampering.
-            raise ValueError("pending login transaction failed authenticated decryption") from None
-        return PendingLogin(verifier, nonce, float(expires_at))
+        return PendingLogin(verifier, nonce, float(expires_at), stored_binding_hash)

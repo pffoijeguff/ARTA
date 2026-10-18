@@ -76,7 +76,7 @@ def test_pkce_login_builds_s256_request_and_validates_nonce():
     assert params["response_type"] == ["code"]
     assert params["code_challenge_method"] == ["S256"]
     assert params["state"] == [start.state]
-    result = client.complete_login(code="authorization-code", state=start.state)
+    result = client.complete_login(code="authorization-code", state=start.state, browser_binding=start.browser_binding_cookie_value)
     assert result.principal.subject == "user-42"
     assert result.principal.scopes == frozenset()  # an ID token authenticates identity, not tool permissions
     assert result.access_token == "access-token-test"
@@ -90,13 +90,13 @@ def test_pkce_state_is_single_use_and_unknown_state_never_exchanges_code():
     client = _client(auth, lambda *_args: calls.append(True) or b"{}")
     start = client.begin_login()
     with pytest.raises(IdentityError, match="state"):
-        client.complete_login(code="authorization-code", state="wrong-state")
+        client.complete_login(code="authorization-code", state="wrong-state", browser_binding=start.browser_binding_cookie_value)
     assert calls == []
     with pytest.raises(IdentityError, match="ID token"):
-        client.complete_login(code="authorization-code", state=start.state)
+        client.complete_login(code="authorization-code", state=start.state, browser_binding=start.browser_binding_cookie_value)
     assert calls == [True]
     with pytest.raises(IdentityError, match="state"):
-        client.complete_login(code="authorization-code", state=start.state)
+        client.complete_login(code="authorization-code", state=start.state, browser_binding=start.browser_binding_cookie_value)
     assert calls == [True]
 
 
@@ -108,9 +108,9 @@ def test_pkce_login_rejects_id_token_with_wrong_nonce():
     }).encode())
     start = client.begin_login()
     with pytest.raises(IdentityError, match="nonce"):
-        client.complete_login(code="authorization-code", state=start.state)
+        client.complete_login(code="authorization-code", state=start.state, browser_binding=start.browser_binding_cookie_value)
     with pytest.raises(IdentityError, match="state"):
-        client.complete_login(code="authorization-code", state=start.state)
+        client.complete_login(code="authorization-code", state=start.state, browser_binding=start.browser_binding_cookie_value)
 
 
 @pytest.mark.parametrize("endpoint", [
@@ -153,8 +153,35 @@ def test_pkce_transaction_can_be_completed_by_another_worker(tmp_path):
         pending_store=second_store,
     )
 
-    result = second_client.complete_login(code="worker-shared-code", state=start.state)
+    result = second_client.complete_login(code="worker-shared-code", state=start.state, browser_binding=start.browser_binding_cookie_value)
     assert result.principal.subject == "user-42"
     assert result.principal.scopes == frozenset()
     with pytest.raises(IdentityError, match="state"):
-        first_client.complete_login(code="worker-shared-code", state=start.state)
+        first_client.complete_login(code="worker-shared-code", state=start.state, browser_binding=start.browser_binding_cookie_value)
+
+
+
+def test_pkce_login_rejects_other_browser_without_consuming_valid_transaction():
+    private, auth = _setup()
+    calls = []
+    client = _client(auth, lambda _url, _fields, _timeout: calls.append(True) or json.dumps({
+        "id_token": _id_token(private, nonce),
+        "access_token": "access-token-test",
+        "token_type": "Bearer",
+        "expires_in": 600,
+    }).encode())
+    start = client.begin_login()
+    nonce = parse_qs(urlsplit(start.authorization_url).query)["nonce"][0]
+
+    with pytest.raises(IdentityError, match="state"):
+        client.complete_login(
+            code="authorization-code", state=start.state, browser_binding="attacker-controlled-cookie"
+        )
+    assert calls == []
+    result = client.complete_login(
+        code="authorization-code", state=start.state,
+        browser_binding=start.browser_binding_cookie_value,
+    )
+    assert result.principal.subject == "user-42"
+    assert start.browser_binding_cookie_name.startswith("arta_oidc_bind_")
+    assert start.browser_binding_cookie_value not in repr(start)
