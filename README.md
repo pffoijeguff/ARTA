@@ -89,7 +89,10 @@ Implemented in this slice:
 - An optional SQLiteMissionStore that checkpoints mission state and evidence, persists action-bound approvals, and keeps hash-chained mission, approval, and action event streams.
 - A durable action journal with prepared / started / succeeded / failed / unknown transitions; tool arguments and output bodies are not stored, and actions with uncertain outcomes are surfaced rather than automatically retried.
 - Cooperative mission cancellation and monotonic deadlines, plus optional per-tool timeouts. Context-aware handlers can poll an ExecutionControl object; deadline expiry or cancellation produces a terminal mission result and preserves uncertain-action journal state.
-- Exact argument contracts and explicit target allowlists for registered tools.
+- Exact argument contracts and explicit target allowlists for registered tools; capability lists are copied into immutable tuples to prevent accidental post-registration policy changes.
+- One normalized argument snapshot is used for both policy evaluation and execution, closing an ordinary mutable-mapping check/use gap.
+- Read-only audit timeline and recursively frozen event details, with persistent hash-chained storage available through SQLite.
+- A fixed 128-action limit for each mission plan and a 128 invocation-start budget in the gateway; exhausting the runtime budget blocks the mission instead of continuing indefinitely.
 - Action-bound approvals using a stable SHA-256 fingerprint over the tool name and complete JSON arguments; direct gateway calls enter an explicit pending-approval state, record requests and consumption, and reject changed-action or same-mission replay attempts. Approval expiry and revocation are checked against a trusted runtime-configured clock.
 - Structured evidence records scoped to an acceptance criterion, with PASS / FAIL / INCONCLUSIVE outcomes, source-action IDs, timestamps, and summaries.
 - Verification fails closed if required evidence is missing, the newest evidence fails or is inconclusive, or the latest observations conflict.
