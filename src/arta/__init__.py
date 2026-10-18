@@ -26,6 +26,7 @@ from .workspace import WorkspaceAdapter, WorkspaceError
 from .identity import AuthenticatedPrincipal, IdentityError, JwtPrincipalAuthenticator, TrustedApprovalService
 from .sandbox import BubblewrapSandbox, SandboxError, SandboxResult
 from .sandbox_tool import register_sandbox_tool
+from .runtime import SecureRuntime
 
 __all__ = [
     "HmacApprovalAuthority",
@@ -60,6 +61,7 @@ __all__ = [
     "SandboxError",
     "SandboxResult",
     "register_sandbox_tool",
+    "SecureRuntime",
     "create_approval_record",
     "fingerprint_action",
     "verify_mission",
