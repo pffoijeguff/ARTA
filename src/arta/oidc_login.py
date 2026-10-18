@@ -10,7 +10,6 @@ import base64
 import hashlib
 import json
 import secrets
-import threading
 import time
 from dataclasses import dataclass, field
 from typing import Callable, Mapping
@@ -20,6 +19,7 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from .identity import AuthenticatedPrincipal, IdentityError
 from .oidc import OidcJwksAuthenticator
+from .pending_login_store import InMemoryPendingLoginStore, PendingLoginStore
 
 _MAX_TOKEN_RESPONSE_BYTES = 65_536
 _MAX_AUTH_CODE_CHARS = 4096
@@ -76,13 +76,6 @@ class OidcLoginResult:
     token_type: str = "Bearer"
 
 
-@dataclass(frozen=True)
-class _PendingLogin:
-    verifier: str
-    nonce: str
-    expires_at: float
-
-
 class OidcAuthorizationCodeClient:
     """Start and complete one-use Authorization Code + PKCE transactions.
 
@@ -103,6 +96,7 @@ class OidcAuthorizationCodeClient:
         transaction_ttl_seconds: int = 300,
         timeout_seconds: float = 5.0,
         token_exchange: Callable[[str, Mapping[str, str], float], bytes] | None = None,
+        pending_store: PendingLoginStore | None = None,
     ) -> None:
         _validate_https_endpoint(authorization_endpoint, "Authorization endpoint")
         _validate_https_endpoint(token_endpoint, "Token endpoint")
@@ -130,8 +124,9 @@ class OidcAuthorizationCodeClient:
         self._ttl = transaction_ttl_seconds
         self._timeout = float(timeout_seconds)
         self._exchange = token_exchange or _post_token_form
-        self._pending: dict[str, _PendingLogin] = {}
-        self._lock = threading.RLock()
+        # Memory is convenient for tests/single-process development. Multi-worker deployments
+        # should inject EncryptedSQLitePendingLoginStore (or another atomic protected store).
+        self._pending_store = pending_store or InMemoryPendingLoginStore(max_entries=1024)
 
     @staticmethod
     def _random_urlsafe(size: int = 32) -> str:
@@ -143,12 +138,11 @@ class OidcAuthorizationCodeClient:
         challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode("ascii")).digest()).rstrip(b"=").decode("ascii")
         state = self._random_urlsafe(32)
         nonce = self._random_urlsafe(32)
-        now = time.monotonic()
-        with self._lock:
-            self._pending = {key: value for key, value in self._pending.items() if value.expires_at > now}
-            if len(self._pending) >= 1024:
-                raise IdentityError("Too many OIDC login transactions are pending; retry after existing transactions expire.")
-            self._pending[state] = _PendingLogin(verifier, nonce, now + self._ttl)
+        expires_at = time.time() + self._ttl
+        try:
+            self._pending_store.put(state, verifier, nonce, expires_at)
+        except Exception:
+            raise IdentityError("OIDC login transaction could not be stored safely; retry later.") from None
         params = {
             "response_type": "code",
             "client_id": self._client_id,
@@ -169,16 +163,13 @@ class OidcAuthorizationCodeClient:
             raise IdentityError("OIDC callback state is invalid.")
         if not isinstance(code, str) or not code or len(code) > _MAX_AUTH_CODE_CHARS:
             raise IdentityError("OIDC authorization code is invalid.")
-        now = time.monotonic()
-        with self._lock:
-            transaction = self._pending.get(state)
-            if transaction is None:
-                raise IdentityError("OIDC login state is unknown, expired, or already consumed.")
-            if transaction.expires_at <= now:
-                self._pending.pop(state, None)
-                raise IdentityError("OIDC login transaction expired.")
-            # Consume before network I/O so the same callback cannot race/replay.
-            self._pending.pop(state, None)
+        # The store must atomically consume before network I/O to prevent callback replay/races.
+        try:
+            transaction = self._pending_store.consume(state)
+        except Exception:
+            raise IdentityError("OIDC login transaction could not be consumed safely.") from None
+        if transaction is None:
+            raise IdentityError("OIDC login state is unknown, expired, or already consumed.")
 
         fields = {
             "grant_type": "authorization_code",
