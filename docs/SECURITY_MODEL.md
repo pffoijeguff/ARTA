@@ -184,3 +184,12 @@ Residual risks and deployment requirements:
 The optional `register_sandbox_tool` bridge registers a non-read-only tool that always requires an action-bound approval and restricts its executable target to the configured sandbox alias set. The argument vector is data, not shell syntax. Tests confirm that an unapproved call does not reach the adapter and that an unknown executable alias is denied by policy before process launch.
 
 The adapter does not globally intercept other ToolGateway handlers. A tool that was registered directly with an arbitrary Python callback still runs in-process. Runtime construction is part of the trusted computing base: it must use the actual BubblewrapSandbox, configure an approval verifier, protect the HMAC key and JWT key ring, and keep token/approval issuance away from models and untrusted request bodies. Adapter unit tests mock the process method and therefore do not prove OS isolation; the opt-in real-host integration test remains a release gate.
+
+
+## 12. Tool execution boundary contract — 2026-10-18
+
+The current executable command path is intentionally narrow: SecureRuntime accepts only its configured sandbox tool and rejects plans containing other tool names. The optional OIDC JWKS authenticator discovers verification keys from a fixed operator-configured HTTPS endpoint; it does not issue tokens or replace an identity provider.
+
+**Trust rule:** a callback registered directly with ToolGateway executes in-process with ARTA's process privileges. ToolGateway validation is not an OS isolation boundary. Such callbacks must be trusted application code. Untrusted plugins and model-generated code must not be registered as arbitrary Python callbacks. Command execution must use the explicit Bubblewrap-backed path and fail closed if its preflight cannot establish isolation.
+
+The detailed adapter contract and acceptance conditions are maintained in [Tool Execution Contract](TOOL_EXECUTION_CONTRACT.md). Existing CI tests cover plan-boundary rejection, exact-action approvals, scopes, replay prevention, and a real-host Bubblewrap smoke test on the configured Ubuntu 24.04 runner. They do not prove safety for arbitrary callbacks, every kernel/configuration, or every future connector. Independent specialist review and deployment-specific tests remain required before production use.
