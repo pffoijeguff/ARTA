@@ -134,6 +134,13 @@ class OidcAuthorizationCodeClient:
     def _random_urlsafe(size: int = 32) -> str:
         return secrets.token_urlsafe(size)
 
+    @staticmethod
+    def browser_binding_cookie_name(state: str) -> str:
+        """Return the per-transaction cookie name for a callback state value."""
+        if not isinstance(state, str) or not state or len(state) > 512:
+            raise IdentityError("OIDC callback state is invalid.")
+        return "arta_oidc_bind_" + hashlib.sha256(state.encode("utf-8")).hexdigest()[:16]
+
     def begin_login(self) -> LoginStart:
         """Create a state/nonce/PKCE transaction and return the trusted authorization URL."""
         verifier = self._random_urlsafe(48)
@@ -159,7 +166,7 @@ class OidcAuthorizationCodeClient:
         }
         parsed = urlsplit(self._authorization_endpoint)
         query = urlencode(params)
-        cookie_name = "arta_oidc_bind_" + hashlib.sha256(state.encode("ascii")).hexdigest()[:16]
+        cookie_name = self.browser_binding_cookie_name(state)
         return LoginStart(
             urlunsplit((parsed.scheme, parsed.netloc, parsed.path, query, "")),
             state,
