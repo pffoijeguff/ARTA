@@ -6,7 +6,7 @@ The project should advance through a few meaningful milestones. Each milestone h
 
 ## Progress snapshot — 2026-10-18
 
-The Python kernel now includes structured evidence, action-bound approvals, strict tool contracts, a MissionRunner, SQLite persistence, a durable action journal, and cooperative cancellation/deadlines. Context-aware handlers can poll a shared control token; arbitrary synchronous handlers are not forcibly interrupted. Safe restart reconciliation, authenticated identities, an OS sandbox, interruptible real adapters, encrypted storage, and the real UI remain open.
+The Python kernel now includes structured evidence, action-bound approvals, strict tool contracts, a MissionRunner, SQLite persistence, a durable action journal, cooperative cancellation/deadlines, and conservative post-restart reconciliation. Recovery marks interrupted actions and blocks non-terminal missions for review; it does not resume lost plans. Authenticated identities, an OS sandbox, interruptible real adapters, encrypted storage, automatic safe resumption, and the real UI remain open.
 
 ## M0 — Project foundation and contracts
 
@@ -122,7 +122,9 @@ The checklist above is not a claim that any milestone is complete. Update milest
 
 **Delivered:** SQLite mission snapshots with checksums; append-only, hash-chained mission, approval, and action event streams; persisted/revocable action-bound approvals; a journal that tracks prepared/started/succeeded/failed/unknown action states; optional MissionRunner checkpoints; and tests for store reopening, stale approvals, and uncertain action outcomes.
 
-**Not yet delivered:** Automatic or safe mission resumption after a process crash. A started/unknown action is exposed for review and must not be blindly retried. Also pending are authenticated approver identities, encryption at rest, transactional integrations with real tools, timeout/cancellation semantics, and an OS-level sandbox.
+**Delivered since the initial journal:** Conservative recovery through `MissionRunner.recover_interrupted_mission()`. It classifies `prepared` actions as interrupted before handler entry, turns `started` actions into `unknown`, marks any non-terminal mission `BLOCKED`, and emits a durable recovery-required audit event. Repeating recovery is a no-op for already-terminal missions; no tool is replayed.
+
+**Not yet delivered:** Automatic or safe mission resumption after a process crash. The plan and raw tool outputs are not persisted, so resumed execution cannot yet re-establish the exact plan or independently verify past effects. A started/unknown action must be reconciled by a human before any replacement action is planned. Also pending are authenticated approver identities, encryption at rest, transactional integrations with real tools, hard interruption of blocking work, and an OS-level sandbox.
 
 
 ## Cooperative execution-control milestone — 2026-10-18
@@ -130,3 +132,10 @@ The checklist above is not a claim that any milestone is complete. Update milest
 **Delivered:** A thread-safe cancellation token, monotonic mission deadlines, narrower per-tool deadlines, contextual handlers that can poll their execution control, a distinct terminal CANCELLED state, and tests proving that interrupted/expired actions fail closed and are journaled as unknown.
 
 **Boundary:** Python does not safely force-stop arbitrary synchronous callbacks. A standard handler may finish an external effect before the gateway observes the expired deadline. Production adapters must use interruptible APIs and their own socket/process timeout support; the prototype does not claim rollback or hard cancellation.
+
+
+## Conservative restart-reconciliation milestone — 2026-10-18
+
+**Delivered:** An explicit recovery entry point loads a mission snapshot and its durable action journal, changes a stranded `started` action to `unknown`, classifies a stranded `prepared` action as interrupted before handler entry, records a recovery-required event, and transitions non-terminal missions to `BLOCKED`. It never invokes an action during recovery. Tests cover ambiguous side effects, pre-start interruption, idempotent repeat recovery, and the no-store boundary.
+
+**Boundary:** This is safe stop-and-review behavior, not automatic resumption. The plan and raw tool results are not durably stored, so ARTA must not claim it can resume the exact interrupted execution. A future resumable design needs versioned serialized plans, artifact/result retention policy, idempotency/reconciliation contracts, and explicit human decisions for uncertain external effects.
