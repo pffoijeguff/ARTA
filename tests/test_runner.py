@@ -520,3 +520,40 @@ def test_persisted_approval_cannot_be_used_by_a_second_mission() -> None:
         assert replay_report.state is MissionState.BLOCKED
         assert replay_report.denied_action_ids == ("write-1",)
         assert calls == ["publish once"]
+
+
+def test_duplicate_approval_ids_block_the_whole_plan_before_side_effects() -> None:
+    args = {"path": "reports/final.md", "content": "one approved write"}
+    approval = create_approval_record(
+        "workspace.write",
+        args,
+        approver_id="authenticated-test-user",
+        approved_at=ISSUED,
+        expires_at=EXPIRES,
+        approval_id="duplicate-plan-approval",
+    )
+    calls: list[str] = []
+    gateway = ToolGateway(AuthorityKernel(clock=lambda: NOW))
+    gateway.register(ToolSpec(
+        "workspace.write",
+        lambda payload: calls.append(payload["content"]) or {"written": True},
+        read_only=False,
+        allowed_arguments=("path", "content"),
+        required_arguments=("path", "content"),
+        target_argument="path",
+        allowed_targets=("reports/final.md",),
+    ))
+    plan = MissionPlan((
+        PlannedAction("write-a", "workspace.write", "criterion-a", args, approval=approval),
+        PlannedAction("write-b", "workspace.write", "criterion-b", args, approval=approval),
+    ))
+    mission = Mission("Do not duplicate one approval", ("criterion-a", "criterion-b"))
+
+    with SQLiteMissionStore(":memory:") as store:
+        store.put_approval(approval)
+        report = MissionRunner(gateway, store).run(mission, plan, passing_verifier)
+        assert report.state is MissionState.BLOCKED
+        assert report.denied_action_ids == ("write-b",)
+        assert calls == []
+        loaded = store.get_approval(approval.approval_id)
+        assert loaded is not None and loaded.status.value == "approved"
