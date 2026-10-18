@@ -200,3 +200,18 @@ These records do not authenticate an approver, make evidence independently trust
 ## 8. Immediate integration requirements
 
 Before adding a real connector, a trusted integration layer must authenticate the approver and persist/revoke approval records; load grants and policies from a protected source; serialize audit events to a protected store; and enforce the Authority Kernel result at the same boundary that executes the action. A tool's return value must not be treated as evidence automatically—the verifier or a separate adapter must create criterion-scoped evidence with traceable provenance.
+
+
+## 9. MissionRunner: implemented orchestration slice
+
+The MissionRunner composes the mission state machine, ToolGateway, AuthorityKernel, and evidence verifier into a minimal end-to-end path:
+
+1. It validates that the plan covers every declared acceptance criterion.
+2. It snapshots each action's normalized JSON arguments when the plan is created.
+3. It preflights every action before invoking the first handler. A forbidden action blocks the plan; an action requiring approval moves the mission to AWAITING_APPROVAL without running earlier actions.
+4. After all actions pass preflight, it transitions the mission to RUNNING and invokes each registered handler through the gateway.
+5. It stops at the first execution failure and reports the failed action while preserving the audit trail.
+6. It transitions to VERIFYING and calls the explicit verifier callback for each tool result. A verifier exception or malformed result becomes INCONCLUSIVE.
+7. It can reach COMPLETED only through verify_mission, after every required criterion has newest unambiguous PASS evidence.
+
+The plan is an in-memory, single-process object. It does not persist checkpoints and cannot safely resume after process restart. Approval records must come from a trusted caller, and tool handlers remain in-process callbacks. The runner provides composition evidence for the first vertical slice, not a complete production execution platform.

@@ -6,7 +6,7 @@ The project should advance through a few meaningful milestones. Each milestone h
 
 ## Progress snapshot — 2026-10-18
 
-The initial Python kernel already exists. This hardening slice upgrades evidence from free-form substring matching to criterion-scoped PASS / FAIL / INCONCLUSIVE records, binds approvals to the exact tool-plus-arguments fingerprint, checks approval status/time bounds, and adds tool argument/target allowlists plus strict JSON boundary checks. Test coverage is expanded around these invariants. This is still an in-memory prototype; it does not close the full M1 end-to-end gateway, identity, audit persistence, sandbox, or orchestrator requirements.
+The initial Python kernel now includes structured PASS / FAIL / INCONCLUSIVE evidence, action-bound approval fingerprints, argument/target contracts, and a MissionRunner that preflights the whole plan, executes through ToolGateway, calls a verifier, and gates completion. This is an end-to-end in-memory slice with mock handlers—not the full M1 production milestone. Identity/authentication, persistent mission and audit storage, sandboxing, robust timeout/cancellation, and a real UI are still open.
 
 ## M0 — Project foundation and contracts
 
@@ -44,7 +44,7 @@ Deliverables:
 - timeout, cancellation, and bounded recovery have tested outcomes;
 - a clean checkout can run the documented checks.
 
-**Current status:** Core state, tool-contract, approval-record, and evidence checks exist with local unit tests. Timeouts, cancellation propagation, durable audit storage, authenticated approvals, and a full end-to-end mission remain open, so M1 is not complete.
+**Current status:** The state/tool/approval/evidence contracts are now composed by a tested in-memory MissionRunner. This closes the mock end-to-end orchestration portion of M1 only. Timeouts, cancellation propagation, durable audit storage, authenticated approvals, crash recovery, and the operating-system sandbox remain open, so M1 is not complete.
 
 ## M2 — Controlled state changes
 

@@ -82,3 +82,14 @@ This file records durable design choices. A decision may be revised, but changes
 **Reason:** A boolean approval flag can be accidentally reused for a different action or target.
 
 **Consequences:** The approval record is stricter but does not authenticate the approver. Only a trusted UI/API boundary may create the record after authenticating user intent; production integration must preserve that trust boundary.
+
+
+## ADR-0009 — Whole-plan preflight before side effects
+
+**Status:** Accepted.
+
+**Decision:** A mission plan is checked against the acceptance criteria and every action is authorized before the first handler executes. If any action is denied, the plan is blocked with no execution. If one or more actions require approval, the mission pauses with no partial execution and may be retried after action-bound approvals are supplied.
+
+**Reason:** Sequentially discovering a missing permission halfway through a multi-step plan can leave a partial external state that the user did not expect.
+
+**Consequences:** The current runner composes the mission state machine and gateway in memory and stops on the first execution failure. Future durable orchestration must preserve this preflight invariant while also handling approval expiry between preflight and execution, non-idempotent uncertain outcomes, cancellation, and process crashes.

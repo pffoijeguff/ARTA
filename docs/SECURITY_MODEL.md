@@ -117,3 +117,10 @@ Important residual risks:
 - Authentication, authorization persistence, secret store integration, retention/deletion enforcement, and adversarial end-to-end tests remain outstanding.
 
 The new checks lower several classes of accidental bypass but do not make this prototype suitable for consequential production use.
+
+
+## 11. Mission orchestration guardrails currently covered
+
+The MissionRunner preflights the entire plan before executing any handler. Missing approvals return the mission to AWAITING_APPROVAL with action IDs and zero tool executions; any denied action blocks the plan before side effects; argument snapshots stop callers mutating a planned action after approval; and execution stops on the first tool failure. Verifier callback errors are converted to INCONCLUSIVE evidence rather than optimistic success.
+
+These are single-process controls. They do not protect against a compromised Python process, malicious in-process handler, forged Approval object, process crash, or tampering with in-memory state. Do not treat this runner as a sandbox or an authenticated approval service.

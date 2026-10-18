@@ -381,6 +381,18 @@ class ToolGateway:
             raise MissionError("Tool name must be non-empty and unique.")
         self._tools[tool.name] = tool
 
+    def authorize(
+        self,
+        tool_name: str,
+        arguments: Mapping[str, Any] | None = None,
+        *,
+        approval: Approval | None = None,
+        now: str | None = None,
+    ) -> PolicyDecision:
+        """Preflight a tool action without executing its handler."""
+        spec = self._tools.get(tool_name) if isinstance(tool_name, str) else None
+        return self._authority.decide(spec, arguments=arguments, approval=approval, now=now)
+
     def invoke(
         self,
         mission: Mission,
@@ -390,8 +402,8 @@ class ToolGateway:
         approval: Approval | None = None,
         now: str | None = None,
     ) -> ToolResult:
-        spec = self._tools.get(tool_name)
-        decision = self._authority.decide(spec, arguments=arguments, approval=approval, now=now)
+        decision = self.authorize(tool_name, arguments=arguments, approval=approval, now=now)
+        spec = self._tools.get(tool_name) if isinstance(tool_name, str) else None
         mission.record("tool.policy_decision", {
             "tool": tool_name, "effect": decision.effect.value, "reason": decision.reason,
             "action_fingerprint": decision.action_fingerprint,

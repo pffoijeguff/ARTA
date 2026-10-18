@@ -85,15 +85,16 @@ Implemented in this slice:
 - A guarded mission state machine with explicit terminal states.
 - A default-deny authority decision for unknown tools.
 - A tool gateway that only invokes explicitly registered in-process handlers.
+- A MissionRunner that preflights the complete plan before any tool runs, pauses when approvals are missing, executes authorized actions, and requests explicit evidence from a verifier callback.
 - Exact argument contracts and explicit target allowlists for registered tools.
 - Action-bound approvals using a stable SHA-256 fingerprint over the tool name and complete JSON arguments; approvals expire and are rejected if revoked, future-dated, expired, or reused for a changed action.
 - Structured evidence records scoped to an acceptance criterion, with PASS / FAIL / INCONCLUSIVE outcomes, source-action IDs, timestamps, and summaries.
 - Verification fails closed if required evidence is missing, the newest evidence fails or is inconclusive, or the latest observations conflict.
 - Audit events record policy outcomes, action fingerprints, and evidence metadata without recording raw tool arguments or exception messages.
 - Strict JSON input/output validation, nesting and payload-size limits, and tests for malformed/circular/non-finite inputs.
-- Automated tests and GitHub Actions CI on Python 3.12 and 3.13.
+- Automated unit tests for core security invariants and end-to-end orchestration, plus GitHub Actions CI on Python 3.12 and 3.13.
 
-**Important limits:** this slice remains in-memory and has no persistent storage, agent/model integration, actual filesystem or shell tools, external connectors, or production UI. An evidence record is still only as trustworthy as the caller that creates it; it does not independently prove an external fact. Approval records also rely on a trusted caller to authenticate the approver—the record is not a digital signature. Audit events are not tamper-proof. Do not use this prototype to control consequential real-world actions.
+**Important limits:** this slice remains in-memory and has no persistent storage, agent/model integration, actual filesystem or shell tools, external connectors, or production UI. An evidence record is still only as trustworthy as the verifier and tool-result producer that create it; it does not independently prove an external fact. Approval records also rely on a trusted caller to authenticate the approver—the record is not a digital signature. Audit events are not tamper-proof. Do not use this prototype to control consequential real-world actions.
 
 ### Run locally
 
@@ -114,16 +115,7 @@ The CI workflow runs compilation checks, dependency consistency checks, and the 
 
 ## Development direction
 
-The next engineering milestone should be a **small, testable vertical slice**, not a broad collection of unconnected features:
-
-- a mission record and validated state machine;
-- a mock/read-only tool behind the Tool Gateway;
-- policy decisions and approval records;
-- evidence-backed verification;
-- structured audit events with secret redaction;
-- unit and integration tests for forbidden transitions and denied actions.
-
-Only after those invariants hold should write-capable tools, agent coordination, durable memory, and external connectors be introduced. The [roadmap](docs/ROADMAP.md) defines the proposed sequence.
+The next milestone is to persist the mission record, approval lifecycle, action results, and audit stream behind a trusted API boundary, then introduce timeouts/cancellation and an OS-level sandbox. The current MissionRunner is deliberately in-process and mock-friendly: it proves the contracts compose, not that real-world automation is safe. Agent/model integration, durable memory, external connectors, and the Command Center UI should follow only after those trust boundaries are tested. See the [roadmap](docs/ROADMAP.md).
 
 ## فارسی
 

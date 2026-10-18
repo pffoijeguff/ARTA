@@ -102,3 +102,18 @@ The current Python suite covers at least these implemented contracts:
 - safe error messages and denial of tool execution outside an active mission.
 
 This section is a map from code to test names, not a statement that the entire acceptance matrix is complete. CI results must be read from the run attached to the exact commit.
+
+
+## 10. MissionRunner integration tests
+
+The current runner tests additionally check:
+- a read-only mission moving from creation through execution, evidence generation, and completion;
+- whole-plan preflight: an unapproved write prevents every tool from running, then a correctly approved rerun can complete;
+- a denied or unknown later action blocks the whole plan before the first handler runs;
+- plan/mission criterion mismatches block execution;
+- failed and throwing verifier paths fail closed;
+- argument mutation after planning cannot change the action snapshot;
+- a tool failure stops later actions and returns a partial-execution report;
+- duplicate action IDs are rejected before execution.
+
+The remaining acceptance rows still need implementation and/or independent evidence. In particular, durable persistence, user authentication, a true OS sandbox, cancellation of in-flight external actions, and real connector tests are not covered by these mock-based tests.
