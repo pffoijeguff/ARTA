@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from arta.approvals import HmacApprovalAuthority
 from arta.core import (
     MAX_TOOL_INVOCATIONS_PER_MISSION,
     Approval,
@@ -243,6 +244,36 @@ def test_write_action_requires_action_bound_approval_and_consumes_it_once() -> N
 
     with pytest.raises(MissionError, match="already been consumed"):
         gateway.invoke(item, tool.name, args, approval=approval)
+
+
+def test_configured_kernel_requires_a_valid_hmac_attestation() -> None:
+    tool = write_tool()
+    args = {"path": "reports/final.md", "content": "verified"}
+    issuer = HmacApprovalAuthority(b"test-only-key-with-at-least-32-bytes!!")
+    signed = issuer.issue(
+        tool.name,
+        args,
+        approver_id="authenticated-test-operator",
+        approved_at=ISSUED,
+        expires_at=EXPIRES,
+        approval_id="signed-approval-1",
+    )
+    kernel = AuthorityKernel(clock=lambda: NOW, approval_verifier=issuer.verify)
+
+    assert kernel.decide(tool, arguments=args, approval=signed).effect is PolicyEffect.ALLOW
+    assert issuer.verify(signed)
+
+    unsigned = valid_approval(tool, args)
+    denied_unsigned = kernel.decide(tool, arguments=args, approval=unsigned)
+    assert denied_unsigned.effect is PolicyEffect.DENY
+    assert denied_unsigned.reason == "Approval authenticity verification failed."
+
+    forged = Approval(**{**signed.__dict__, "approver_id": "forged-operator"})
+    assert kernel.decide(tool, arguments=args, approval=forged).effect is PolicyEffect.DENY
+    assert not HmacApprovalAuthority(b"a-different-test-key-with-32-bytes!!").verify(signed)
+
+    with pytest.raises(MissionError, match="at least 32 bytes"):
+        HmacApprovalAuthority(b"too-short")
 
 
 def test_approval_cannot_be_reused_after_arguments_change() -> None:
