@@ -22,6 +22,7 @@ from .core import (
 from .control import CancellationToken, ExecutionCancelled, ExecutionControl, ExecutionDeadlineExceeded
 from .runner import MissionPlan, MissionRunReport, MissionRunner, PlannedAction
 from .persistence import SQLiteMissionStore, StoreError, StoreIntegrityError
+from .workspace import WorkspaceAdapter, WorkspaceError
 
 __all__ = [
     "HmacApprovalAuthority",
@@ -46,6 +47,8 @@ __all__ = [
     "ToolGateway",
     "ToolResult",
     "ToolSpec",
+    "WorkspaceAdapter",
+    "WorkspaceError",
     "create_approval_record",
     "fingerprint_action",
     "verify_mission",

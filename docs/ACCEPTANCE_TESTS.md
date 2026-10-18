@@ -145,3 +145,19 @@ The current suite additionally checks:
 - cancellation during verification creates INCONCLUSIVE evidence and cannot produce a successful mission.
 
 Not covered: killing stuck external processes, forced cancellation of blocking libraries, socket-level timeout behavior for real adapters, or rollback of external side effects.
+
+
+## 13. Allowlisted workspace adapter tests
+
+The workspace adapter suite must verify:
+- only configured relative paths can be read or written;
+- absolute paths, traversal, backslashes, symlinked files, and symlinked parent directories are rejected;
+- reads reject binary/non-UTF-8 and oversized content;
+- creating a file requires the target to be absent;
+- replacing a file requires the exact prior SHA-256, and stale hashes are rejected;
+- the write tool is approval-gated and a signed approval cannot be replayed for changed arguments;
+- successful write reports before/after digests that can be independently checked;
+- a failed atomic replacement preserves the old file and cleans temporary artifacts;
+- no delete, directory listing, shell, or arbitrary-path operation is exposed.
+
+Boundary not claimed by these tests: resistance to every same-user filesystem race or replacement by a hostile process. An OS sandbox remains a production requirement.
