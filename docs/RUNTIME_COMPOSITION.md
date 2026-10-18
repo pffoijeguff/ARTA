@@ -19,3 +19,38 @@ scope enforcement, argument binding, and replay prevention; they do **not** prov
 isolation. The opt-in real-host Bubblewrap test remains a release gate. Token issuance, MFA,
 remote JWKS rotation, encrypted storage, and security certification are not provided. The HMAC
 key and identity configuration must be managed outside the repository and SQLite database.
+
+
+## OIDC JWKS key discovery and rotation
+
+The optional `OidcJwksAuthenticator` can replace the static `JwtPrincipalAuthenticator`
+when an operator has a trusted OIDC issuer and its HTTPS JWKS endpoint. It accepts only a
+configured HTTPS URL, refuses redirects, applies a request timeout and 1 MiB response limit,
+requires public signing keys with explicit supported asymmetric algorithms, rejects duplicate
+key IDs/private JWK material, and caches keys for a bounded interval. An unknown `kid` causes
+one forced refresh to support normal key rotation. The token's `iss`, `aud`, time claims,
+lifetime and scopes are still validated by the existing principal authenticator.
+
+Example (configure values from the identity provider's trusted operator documentation; never
+take the URL, issuer, audience, or key configuration from a token or model output):
+
+```python
+from arta import OidcJwksAuthenticator, SecureRuntime
+
+authenticator = OidcJwksAuthenticator(
+    jwks_url="https://identity.example.com/.well-known/jwks.json",
+    issuer="https://identity.example.com/",
+    audience="arta-runtime",
+    cache_ttl_seconds=300,
+    timeout_seconds=3,
+)
+# Pass authenticator to SecureRuntime with the separately provisioned approval HMAC key,
+# SQLite store, BubblewrapSandbox, and explicit required scopes.
+```
+
+This component fetches verification keys; it does **not** implement interactive OIDC login,
+authorization-code/PKCE, client registration, MFA, logout, or immediate session revocation.
+A provider must issue the JWTs, and operators remain responsible for issuer/audience correctness,
+network egress policy, key lifecycle monitoring, secret management and deployment tests. Key
+removal becomes visible after the cache expires unless an operator forces a refresh/restarts the
+service. This is a key-discovery adapter, not an identity-provider product or security certification.
