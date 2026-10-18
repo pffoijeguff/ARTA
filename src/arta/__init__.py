@@ -23,7 +23,7 @@ from .control import CancellationToken, ExecutionCancelled, ExecutionControl, Ex
 from .runner import MissionPlan, MissionRunReport, MissionRunner, PlannedAction
 from .persistence import SQLiteMissionStore, StoreError, StoreIntegrityError
 from .workspace import WorkspaceAdapter, WorkspaceError
-from .identity import AuthenticatedPrincipal, IdentityError, JwtPrincipalAuthenticator, TrustedApprovalService
+from .identity import AuthenticatedPrincipal, IdentityError, JwtPrincipalAuthenticator, PrincipalAuthenticator, TrustedApprovalService
 from .oidc import OidcJwksAuthenticator
 from .sandbox import BubblewrapSandbox, SandboxError, SandboxResult
 from .sandbox_tool import register_sandbox_tool
@@ -57,6 +57,7 @@ __all__ = [
     "AuthenticatedPrincipal",
     "IdentityError",
     "JwtPrincipalAuthenticator",
+    "PrincipalAuthenticator",
     "OidcJwksAuthenticator",
     "TrustedApprovalService",
     "BubblewrapSandbox",
