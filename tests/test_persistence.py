@@ -77,13 +77,15 @@ def test_mission_and_hash_chained_audit_round_trip_across_store_reopen(tmp_path)
         assert loaded.audit == item.audit
 
 
-def test_store_rejects_mutated_audit_prefix_and_changed_mission_identity() -> None:
+def test_mission_audit_cannot_be_rewritten_and_changed_identity_is_rejected() -> None:
     item = completed_mission()
     with SQLiteMissionStore(":memory:") as store:
         store.save_mission(item)
-        item.audit[0] = AuditEvent("rewritten.created", item.mission_id)
-        with pytest.raises(StoreError, match="diverges"):
-            store.save_mission(item)
+        with pytest.raises(TypeError):
+            item.audit[0] = AuditEvent("rewritten.created", item.mission_id)  # type: ignore[index]
+        with pytest.raises(TypeError):
+            item.audit[0].details["changed"] = True
+        store.save_mission(item)
 
     original = completed_mission()
     with SQLiteMissionStore(":memory:") as store:
