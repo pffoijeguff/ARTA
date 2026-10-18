@@ -1,0 +1,44 @@
+name: Linux Bubblewrap isolation integration
+
+on:
+  push:
+    paths:
+      - "src/arta/sandbox.py"
+      - "tests/test_sandbox.py"
+      - "pyproject.toml"
+      - ".github/workflows/sandbox-integration.yml"
+  pull_request:
+    paths:
+      - "src/arta/sandbox.py"
+      - "tests/test_sandbox.py"
+      - "pyproject.toml"
+      - ".github/workflows/sandbox-integration.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  real-bubblewrap:
+    name: Real Linux namespace, network, and host-write isolation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install Bubblewrap
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes bubblewrap
+          bwrap --version
+      - name: Install ARTA and test dependencies
+        run: python -m pip install -e ".[dev]"
+      - name: Run real-host isolation test (fail closed if namespaces are unavailable)
+        env:
+          ARTA_RUN_BWRAP_INTEGRATION: "1"
+        run: python -m pytest -vv -rs tests/test_sandbox.py::test_real_bubblewrap_blocks_host_writes_and_network

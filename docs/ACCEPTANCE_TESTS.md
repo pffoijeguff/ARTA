@@ -204,3 +204,19 @@ The normal CI suite mocks Popen for deterministic lifecycle tests. The opt-in in
 - command exit status, timeout and output truncation are returned as structured fields for independent mission verification.
 
 These tests use a real BubblewrapSandbox configuration object with its `run` method replaced by a test double. They validate policy wiring only, not kernel-level isolation. The opt-in Bubblewrap integration test must be executed on the deployment host.
+
+
+## 11. Real-host Bubblewrap release gate
+
+The dedicated workflow `.github/workflows/sandbox-integration.yml` installs Bubblewrap on
+Ubuntu 24.04 and explicitly enables `test_real_bubblewrap_blocks_host_writes_and_network`.
+Unlike the default unit suite, this job does not silently skip when Bubblewrap or usable user
+namespaces are missing: the job must execute the real integration test and pass, or remain a
+visible failed release gate. It checks that a real sandbox launch succeeds, network access is
+unavailable from the task namespace, a write to the sandbox's `/tmp` does not appear on the
+host, and the source workspace remains unchanged.
+
+A passing hosted-runner job is evidence for that runner image/kernel configuration only. It
+does not certify every Linux distribution, container host, or production deployment. Run the
+same gate on each supported deployment class before enabling execution there. This job is
+separate from the default matrix so the ordinary unit suite remains portable.
