@@ -87,6 +87,13 @@ def test_runner_preflights_every_action_and_executes_nothing_until_approval_exis
     assert pending.pending_action_ids == ("write-1",)
     assert calls == []
     assert not pending.tool_results
+    request_events = [
+        event for event in mission.audit if event.event_type == "tool.approval_requested"
+    ]
+    assert len(request_events) == 1
+    assert request_events[0].details["action_id"] == "write-1"
+    assert request_events[0].details["tool"] == "report.write"
+    assert request_events[0].details["action_fingerprint"]
 
     approval = create_approval_record(
         write_tool.name,
@@ -104,6 +111,11 @@ def test_runner_preflights_every_action_and_executes_nothing_until_approval_exis
     assert completed.completed
     assert completed.state is MissionState.COMPLETED
     assert calls == ["read", "write"]
+    consumed = [
+        event for event in mission.audit if event.event_type == "tool.approval_consumed"
+    ]
+    assert len(consumed) == 1
+    assert consumed[0].details["approval_id"] == "write-approval"
 
 
 def test_denied_action_blocks_whole_plan_before_any_tool_runs() -> None:
