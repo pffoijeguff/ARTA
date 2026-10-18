@@ -27,6 +27,8 @@ The purpose of this plan is to make the product's most important promises observ
 | AUTH-05 | Approved arguments are materially changed before execution | Approval is invalidated and reauthorization is required. |
 | AUTH-06 | Agent attempts to grant itself a permission | Denied; permission set remains unchanged. |
 | AUTH-07 | User revokes a capability | Subsequent invocations are denied, including queued actions not yet started. |
+| AUTH-08 | A persisted approval is consumed by one mission | Another mission cannot reuse it, including after SQLite is reopened. |
+| AUTH-09 | Two planned actions reference the same approval id | Whole-plan preflight denies the duplicate before any handler runs. |
 
 ## 3. Tool Gateway
 
@@ -161,3 +163,10 @@ The workspace adapter suite must verify:
 - no delete, directory listing, shell, or arbitrary-path operation is exposed.
 
 Boundary not claimed by these tests: resistance to every same-user filesystem race or replacement by a hostile process. An OS sandbox remains a production requirement.
+
+
+## 14. Single-use persisted approval tests
+
+The implementation atomically marks an approval consumed in SQLite before entering its handler. The approval lifecycle event is hash-chained, and consumption is bound to the mission and action fingerprint. Regression tests cover cross-mission reuse, database reopening, projection tampering, and duplicate identifiers during whole-plan preflight.
+
+This closes the prototype's persistence-level replay gap; it does not authenticate the human approver or provide a distributed identity service.

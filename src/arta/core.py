@@ -145,6 +145,7 @@ class ApprovalStatus(str, Enum):
     APPROVED = "approved"
     DENIED = "denied"
     REVOKED = "revoked"
+    CONSUMED = "consumed"
 
 
 TRANSITIONS = {

@@ -151,3 +151,12 @@ Automatic resumption remains unsafe because the durable snapshot omits the exact
 The prototype uses monotonic deadlines and a thread-safe cancellation token. Mission-wide timeouts are narrowed by optional per-tool timeouts; a contextual handler can poll the shared ExecutionControl while it runs. Cancellation and deadline exceptions are preserved as distinct outcomes in the mission state and the action journal.
 
 This design intentionally does not use unsafe thread termination. A standard synchronous handler cannot be forcibly stopped: the gateway detects cancellation/deadline before and after it returns, which may be after the side effect happened. Such an action is marked unknown and requires review. Hard process isolation, interruptible adapters, network/socket timeouts, external-effect reconciliation, and cancellation acknowledgements remain production requirements.
+
+
+## 15. Single-use approval lifecycle
+
+When a MissionRunner is configured with SQLite persistence, a supplied approval is consumed atomically before the associated handler is entered. The store checks that the approval is still active, that its exact action fingerprint and signature match the persisted record, and that the consuming mission already exists. Consumption is recorded in the approval's append-only hash chain and changes its projected status to `consumed`. That status is verified when the approval is loaded, so reuse is denied across missions and process restarts. Whole-plan preflight also rejects duplicate approval identifiers before any action runs.
+
+The consumption point intentionally precedes handler entry: if the process crashes after consumption but before the effect starts, the approval is still spent and a fresh approval is required. That is a conservative availability trade-off to reduce replay risk.
+
+Residual boundary: this is a prototype-level SQLite control, not a complete multi-user authorization service. It still does not authenticate the person behind `approver_id`; the trusted application boundary must do that. The HMAC key must remain outside the repository and outside model-visible data. A compromised process or database operator can exceed these API-level guarantees.
