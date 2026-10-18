@@ -74,6 +74,12 @@ def _digest(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
+def _is_sha256(value: object) -> bool:
+    return isinstance(value, str) and len(value) == 64 and all(
+        character in "0123456789abcdef" for character in value
+    )
+
+
 def _chain_hash(scope_id: str, sequence: int, previous_hash: str, event_json: str) -> str:
     envelope = f"{scope_id}\n{sequence}\n{previous_hash}\n{event_json}"
     return _digest(envelope)
@@ -243,28 +249,64 @@ class SQLiteMissionStore:
     def _mission_snapshot(mission: Mission) -> dict[str, Any]:
         if not isinstance(mission, Mission):
             raise StoreError("save_mission requires a Mission object.")
+        if not isinstance(mission.mission_id, str) or not mission.mission_id.strip():
+            raise StoreError("Mission id must be a non-empty string.")
+        if not isinstance(mission.goal, str) or not mission.goal.strip():
+            raise StoreError("Mission goal must be a non-empty string.")
         if not isinstance(mission.state, MissionState):
             raise StoreError("Mission state is invalid.")
+        criteria = tuple(mission.acceptance_criteria)
+        if (
+            not criteria
+            or any(not isinstance(item, str) or not item.strip() for item in criteria)
+            or len(set(criteria)) != len(criteria)
+        ):
+            raise StoreError("Mission acceptance criteria must be non-empty and unique.")
         evidence_items: list[dict[str, str]] = []
+        evidence_ids: set[str] = set()
+        parsed_evidence_times = []
         for item in mission.evidence:
             if not isinstance(item, Evidence):
                 raise StoreError("Mission contains an invalid evidence record.")
-            if item.criterion not in mission.acceptance_criteria:
+            if item.criterion not in criteria:
                 raise StoreError("Evidence references an unknown acceptance criterion.")
             if not isinstance(item.outcome, EvidenceOutcome):
                 raise StoreError("Evidence outcome is invalid.")
+            if any(
+                not isinstance(value, str) or not value.strip()
+                for value in (item.evidence_id, item.source_action_id, item.summary)
+            ):
+                raise StoreError("Evidence id, source action, and summary must be non-empty strings.")
+            if item.evidence_id in evidence_ids:
+                raise StoreError("Evidence ids must be unique within a mission.")
+            evidence_ids.add(item.evidence_id)
+            parsed_time = _parse_timestamp(item.observed_at)
+            parsed_evidence_times.append((item.criterion, parsed_time, item.outcome))
             evidence_items.append({
                 "criterion": item.criterion,
                 "outcome": item.outcome.value,
                 "source_action_id": item.source_action_id,
                 "summary": item.summary,
-                "observed_at": _safe_timestamp(item.observed_at, "Evidence timestamp"),
+                "observed_at": parsed_time.isoformat(),
                 "evidence_id": item.evidence_id,
             })
+        if mission.state is MissionState.COMPLETED:
+            for criterion in criteria:
+                observations = [
+                    (when, outcome)
+                    for recorded_criterion, when, outcome in parsed_evidence_times
+                    if recorded_criterion == criterion
+                ]
+                if not observations:
+                    raise StoreError("A completed mission must have passing evidence for every criterion.")
+                latest_time = max(when for when, _ in observations)
+                latest_outcomes = [outcome for when, outcome in observations if when == latest_time]
+                if not latest_outcomes or any(outcome is not EvidenceOutcome.PASS for outcome in latest_outcomes):
+                    raise StoreError("A completed mission cannot contain missing, failed, or conflicting latest evidence.")
         return {
             "mission_id": mission.mission_id,
-            "goal": mission.goal,
-            "acceptance_criteria": list(mission.acceptance_criteria),
+            "goal": mission.goal.strip(),
+            "acceptance_criteria": list(criteria),
             "state": mission.state.value,
             "evidence": evidence_items,
         }
@@ -323,7 +365,7 @@ class SQLiteMissionStore:
             if _canonical_json(parsed) != row["event_json"]:
                 raise StoreIntegrityError(f"Audit event JSON is not canonical for {scope_id}.")
             expected_hash = _chain_hash(scope_id, expected_seq, previous, row["event_json"])
-            if not hmac.compare_digest(expected_hash, row["event_hash"]):
+            if not _is_sha256(row["event_hash"]) or not hmac.compare_digest(expected_hash, row["event_hash"]):
                 raise StoreIntegrityError(f"Audit hash mismatch for {scope_id}.")
             previous = row["event_hash"]
         return rows
@@ -364,7 +406,7 @@ class SQLiteMissionStore:
         if len(snapshot_json.encode("utf-8")) > _MAX_SNAPSHOT_BYTES:
             raise StoreError("Mission snapshot exceeds the 2 MiB size limit.")
         snapshot_hash = _digest(snapshot_json)
-        criteria_json = _canonical_json(list(mission.acceptance_criteria))
+        criteria_json = _canonical_json(snapshot["acceptance_criteria"])
         local_events = [
             _canonical_json(self._event_payload(event, mission.mission_id))
             for event in mission.audit
@@ -379,11 +421,11 @@ class SQLiteMissionStore:
                     "INSERT INTO missions(mission_id, goal, criteria_json, state, snapshot_json, "
                     "snapshot_hash, updated_at) VALUES(?, ?, ?, ?, ?, ?, ?)",
                     (
-                        mission.mission_id, mission.goal, criteria_json, mission.state.value,
+                        mission.mission_id, snapshot["goal"], criteria_json, mission.state.value,
                         snapshot_json, snapshot_hash, _now(),
                     ),
                 )
-            elif row["goal"] != mission.goal or row["criteria_json"] != criteria_json:
+            elif row["goal"] != snapshot["goal"] or row["criteria_json"] != criteria_json:
                 raise StoreError("Mission identity is immutable: goal and acceptance criteria cannot change.")
 
             stored_events = self._verify_chain_locked(
@@ -417,7 +459,7 @@ class SQLiteMissionStore:
             ).fetchone()
             if row is None:
                 return None
-            if not hmac.compare_digest(_digest(row["snapshot_json"]), row["snapshot_hash"]):
+            if not _is_sha256(row["snapshot_hash"]) or not hmac.compare_digest(_digest(row["snapshot_json"]), row["snapshot_hash"]):
                 raise StoreIntegrityError(f"Mission snapshot hash mismatch for {mission_id}.")
             event_rows = self._verify_chain_locked(
                 "mission_audit_events", "mission_id", mission_id
@@ -579,7 +621,7 @@ class SQLiteMissionStore:
             }
             if creation.get("kind") != "created" or creation.get("approval") != original:
                 raise StoreIntegrityError(f"Approval creation record mismatch for {approval_id}.")
-            if not hmac.compare_digest(_digest(_canonical_json(original)), row["record_hash"]):
+            if not _is_sha256(row["record_hash"]) or not hmac.compare_digest(_digest(_canonical_json(original)), row["record_hash"]):
                 raise StoreIntegrityError(f"Approval record hash mismatch for {approval_id}.")
             expected_status = ApprovalStatus.APPROVED
             for event_row in rows[1:]:
@@ -764,12 +806,30 @@ class SQLiteMissionStore:
             result: list[dict[str, Any]] = []
             for action_id, event in latest.items():
                 row = by_id[action_id]
+                events_for_action = [
+                    json.loads(event_row["event_json"])
+                    for event_row in event_rows
+                    if json.loads(event_row["event_json"])["action_id"] == action_id
+                ]
+                expected_started = next(
+                    (item["timestamp"] for item in events_for_action if item["status"] == "started"),
+                    None,
+                )
+                expected_finished = next(
+                    (
+                        item["timestamp"] for item in reversed(events_for_action)
+                        if item["status"] in _TERMINAL_ACTION_STATUSES
+                    ),
+                    None,
+                )
                 if (
                     row["tool_name"] != event["tool_name"]
                     or row["action_fingerprint"] != event["action_fingerprint"]
                     or row["status"] != event["status"]
                     or row["result_digest"] != event["result_digest"]
                     or row["error_type"] != event["error_type"]
+                    or row["started_at"] != expected_started
+                    or row["finished_at"] != expected_finished
                 ):
                     raise StoreIntegrityError(f"Action journal state mismatch for {action_id}.")
                 result.append({

@@ -292,3 +292,81 @@ def test_non_existing_mission_and_approval_loads_return_none() -> None:
     with SQLiteMissionStore(":memory:") as store:
         assert store.load_mission("missing-mission") is None
         assert store.get_approval("missing-approval") is None
+
+
+
+def test_store_refuses_a_falsely_completed_mission() -> None:
+    item = Mission("Claim completion without proof", ("report-read",))
+    item.state = MissionState.COMPLETED  # Simulate unsafe direct field mutation.
+    with SQLiteMissionStore(":memory:") as store:
+        with pytest.raises(StoreError, match="passing evidence"):
+            store.save_mission(item)
+
+
+def test_store_refuses_completion_when_latest_evidence_is_failed() -> None:
+    item = Mission("Attempt to bypass verifier", ("report-read",))
+    item.state = MissionState.RUNNING
+    item.add_evidence(Evidence(
+        criterion="report-read",
+        outcome=EvidenceOutcome.PASS,
+        source_action_id="read-1",
+        summary="Old passing observation.",
+        observed_at="2026-10-18T07:00:00+00:00",
+        evidence_id="evidence-pass",
+    ))
+    item.add_evidence(Evidence(
+        criterion="report-read",
+        outcome=EvidenceOutcome.FAIL,
+        source_action_id="read-2",
+        summary="Newer failed observation.",
+        observed_at="2026-10-18T07:30:00+00:00",
+        evidence_id="evidence-fail",
+    ))
+    item.state = MissionState.COMPLETED
+    with SQLiteMissionStore(":memory:") as store:
+        with pytest.raises(StoreError, match="latest evidence"):
+            store.save_mission(item)
+
+
+def test_action_journal_detects_projection_tampering() -> None:
+    item = Mission("Track a tool action", ("tracked",))
+    fingerprint = fingerprint_action("read", {"path": "reports/final.md"})
+    with SQLiteMissionStore(":memory:") as store:
+        store.save_mission(item)
+        store.record_action_event(item.mission_id, "read-1", "read", fingerprint, "prepared")
+        store.record_action_event(item.mission_id, "read-1", "read", fingerprint, "started")
+        store._connection.execute(
+            "UPDATE action_journal SET status='succeeded' WHERE mission_id=? AND action_id=?",
+            (item.mission_id, "read-1"),
+        )
+        with pytest.raises(StoreIntegrityError, match="projection mismatch|state mismatch"):
+            store.action_journal(item.mission_id)
+
+
+def test_revoked_approval_projection_cannot_be_reverted_without_detection() -> None:
+    approval = approval_for_write()
+    with SQLiteMissionStore(":memory:") as store:
+        store.put_approval(approval)
+        store.revoke_approval(
+            approval.approval_id, actor_id="trusted-test-operator", reason="Revoke it."
+        )
+        store._connection.execute(
+            "UPDATE approvals SET status='approved' WHERE approval_id=?",
+            (approval.approval_id,),
+        )
+        with pytest.raises(StoreIntegrityError, match="status does not match"):
+            store.get_approval(approval.approval_id)
+
+
+
+def test_hash_chain_detects_corrupted_hash_even_if_sql_trigger_is_removed() -> None:
+    item = completed_mission()
+    with SQLiteMissionStore(":memory:") as store:
+        store.save_mission(item)
+        store._connection.execute("DROP TRIGGER mission_audit_no_update")
+        store._connection.execute(
+            "UPDATE mission_audit_events SET event_hash=? WHERE mission_id=? AND seq=1",
+            ("not-a-valid-digest", item.mission_id),
+        )
+        with pytest.raises(StoreIntegrityError, match="hash mismatch"):
+            store.audit_events(item.mission_id)
