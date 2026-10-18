@@ -63,6 +63,8 @@ class InMemoryPendingLoginStore:
             self._items[state] = PendingLogin(verifier, nonce, expires_at, browser_binding_hash)
 
     def consume(self, state: str, *, browser_binding_hash: str, now: float | None = None) -> PendingLogin | None:
+        if not _valid_binding_hash(browser_binding_hash):
+            raise ValueError("invalid browser binding digest")
         with self._lock:
             transaction = self._items.get(state)
             if transaction is None:
@@ -155,7 +157,6 @@ class EncryptedSQLitePendingLoginStore:
         self._validate_state(state)
         if not isinstance(browser_binding_hash, str) or len(browser_binding_hash) != 64:
             raise ValueError("invalid browser binding digest")
-        current = time.time() if now is None else now
         with self._lock, closing(self._connect()) as db:
             db.execute("BEGIN IMMEDIATE")
             try:
@@ -167,6 +168,7 @@ class EncryptedSQLitePendingLoginStore:
                     db.execute("COMMIT")
                     return None
                 expires_at, iv, ciphertext = row
+                current = time.time() if now is None else now
                 if expires_at <= current:
                     db.execute("DELETE FROM pending_oidc_login WHERE state = ?", (state,))
                     db.execute("COMMIT")
