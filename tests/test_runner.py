@@ -3,13 +3,17 @@ from __future__ import annotations
 import threading
 import time
 
+import pytest
+
 from arta.control import CancellationToken, ExecutionControl
 from arta.persistence import SQLiteMissionStore
 from arta.core import (
+    MAX_TOOL_INVOCATIONS_PER_MISSION,
     Approval,
     AuthorityKernel,
     EvidenceOutcome,
     Mission,
+    MissionError,
     MissionState,
     ToolGateway,
     ToolSpec,
@@ -25,6 +29,15 @@ EXPIRES = "2026-10-18T09:00:00+00:00"
 
 def passing_verifier(action: PlannedAction, result):
     return EvidenceOutcome.PASS, f"Independent fixture check passed for {action.action_id}."
+
+
+def test_mission_plan_rejects_more_actions_than_the_execution_budget() -> None:
+    actions = tuple(
+        PlannedAction(f"action-{index}", "report.read", "report-read")
+        for index in range(MAX_TOOL_INVOCATIONS_PER_MISSION + 1)
+    )
+    with pytest.raises(MissionError, match="at most"):
+        MissionPlan(actions)
 
 
 def test_runner_executes_and_verifies_a_read_only_mission_end_to_end() -> None:
