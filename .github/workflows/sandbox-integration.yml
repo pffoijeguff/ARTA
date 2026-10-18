@@ -36,6 +36,14 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes bubblewrap
           bwrap --version
+      - name: Enable Ubuntu unprivileged user namespaces for this ephemeral test runner
+        run: |
+          if test -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          else
+            echo "This runner does not expose the Ubuntu AppArmor user-namespace control; real isolation test cannot be certified here."
+            exit 1
+          fi
       - name: Install ARTA and test dependencies
         run: python -m pip install -e ".[dev]"
       - name: Run real-host isolation test (fail closed if namespaces are unavailable)
