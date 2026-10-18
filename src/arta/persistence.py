@@ -678,7 +678,7 @@ class SQLiteMissionStore:
         with self._transaction():
             row = self._connection.execute(
                 "SELECT approval_id, approver_id, action_fingerprint, approved_at, expires_at, "
-                "status, record_hash FROM approvals WHERE approval_id=?",
+                "status, signature, record_hash FROM approvals WHERE approval_id=?",
                 (approval_id,),
             ).fetchone()
             if row is None:
@@ -700,6 +700,8 @@ class SQLiteMissionStore:
                 "expires_at": row["expires_at"],
                 "status": ApprovalStatus.APPROVED.value,
             }
+            if "signature" in creation.get("approval", {}):
+                original["signature"] = row["signature"]
             if creation.get("kind") != "created" or creation.get("approval") != original:
                 raise StoreIntegrityError(f"Approval creation record mismatch for {approval_id}.")
             if not hmac.compare_digest(_digest(_canonical_json(original)), row["record_hash"]):
