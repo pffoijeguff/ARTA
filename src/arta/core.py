@@ -12,6 +12,7 @@ import math
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
+from types import MappingProxyType
 from typing import Any, Callable, Mapping
 from uuid import uuid4
 
@@ -58,7 +59,7 @@ def _normalize_json_value(value: Any, *, depth: int = 0, ancestors: set[int] | N
             return copied
         finally:
             ancestors.remove(marker)
-    if isinstance(value, list):
+    if isinstance(value, (list, tuple)):
         marker = id(value)
         if marker in ancestors:
             raise ValueError("Circular JSON arrays are not allowed.")
@@ -82,6 +83,35 @@ def _normalized_arguments(arguments: Mapping[str, Any] | None) -> dict[str, Any]
     if len(payload.encode("utf-8")) > 64 * 1024:
         raise ValueError("Tool arguments exceed the 64 KiB limit.")
     return copied
+
+
+class _FrozenList(list):
+    """List-compatible JSON array that rejects ordinary mutation operations."""
+
+    @staticmethod
+    def _deny(*_args: Any, **_kwargs: Any) -> None:
+        raise TypeError("Audit event details are immutable.")
+
+    __setitem__ = _deny
+    __delitem__ = _deny
+    __iadd__ = _deny
+    __imul__ = _deny
+    append = _deny
+    clear = _deny
+    extend = _deny
+    insert = _deny
+    pop = _deny
+    remove = _deny
+    reverse = _deny
+    sort = _deny
+
+
+def _freeze_json_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        return MappingProxyType({key: _freeze_json_value(item) for key, item in value.items()})
+    if isinstance(value, list):
+        return _FrozenList(_freeze_json_value(item) for item in value)
+    return value
 
 
 class MissionState(str, Enum):
@@ -126,7 +156,8 @@ TRANSITIONS = {
         MissionState.RUNNING, MissionState.BLOCKED, MissionState.FAILED, MissionState.CANCELLED,
     },
     MissionState.RUNNING: {
-        MissionState.VERIFYING, MissionState.FAILED, MissionState.BLOCKED, MissionState.CANCELLED,
+        MissionState.AWAITING_APPROVAL, MissionState.VERIFYING, MissionState.FAILED,
+        MissionState.BLOCKED, MissionState.CANCELLED,
     },
     MissionState.VERIFYING: {
         MissionState.COMPLETED, MissionState.FAILED, MissionState.BLOCKED, MissionState.CANCELLED,
@@ -149,6 +180,19 @@ class AuditEvent:
     timestamp: str = field(default_factory=_now)
     details: Mapping[str, Any] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.event_type, str) or not self.event_type.strip():
+            raise MissionError("Audit event type must be a non-empty string.")
+        if not isinstance(self.mission_id, str) or not self.mission_id.strip():
+            raise MissionError("Audit event mission id must be a non-empty string.")
+        try:
+            copied = _normalize_json_value(self.details)
+        except (TypeError, ValueError):
+            raise MissionError("Audit event details must be bounded JSON data.") from None
+        if not isinstance(copied, dict):
+            raise MissionError("Audit event details must be a JSON object.")
+        object.__setattr__(self, "details", _freeze_json_value(copied))
+
 
 @dataclass(frozen=True)
 class Evidence:
@@ -169,22 +213,43 @@ class Mission:
     mission_id: str = field(default_factory=lambda: str(uuid4()))
     state: MissionState = MissionState.CREATED
     evidence: list[Evidence] = field(default_factory=list)
-    audit: list[AuditEvent] = field(default_factory=list)
+    _audit: list[AuditEvent] = field(default_factory=list, init=False, repr=False)
 
     def __post_init__(self) -> None:
+        if not isinstance(self.goal, str) or not self.goal.strip():
+            raise MissionError("Mission goal must be a non-empty string.")
         self.goal = self.goal.strip()
-        self.acceptance_criteria = tuple(item.strip() for item in self.acceptance_criteria if item.strip())
-        if not self.goal:
-            raise MissionError("Mission goal must not be empty.")
+        if not isinstance(self.mission_id, str) or not self.mission_id.strip():
+            raise MissionError("Mission id must be a non-empty string.")
+        self.mission_id = self.mission_id.strip()
+        if isinstance(self.acceptance_criteria, (str, bytes)) or not isinstance(
+            self.acceptance_criteria, (tuple, list)
+        ):
+            raise MissionError("Acceptance criteria must be a sequence of non-empty strings.")
+        if any(not isinstance(item, str) or not item.strip() for item in self.acceptance_criteria):
+            raise MissionError("Acceptance criteria must be non-empty strings.")
+        self.acceptance_criteria = tuple(item.strip() for item in self.acceptance_criteria)
         if not self.acceptance_criteria:
             raise MissionError("At least one acceptance criterion is required.")
         if len(set(self.acceptance_criteria)) != len(self.acceptance_criteria):
             raise MissionError("Acceptance criteria must be unique.")
         self.record("mission.created", {"criteria_count": len(self.acceptance_criteria)})
 
+    @property
+    def audit(self) -> tuple[AuditEvent, ...]:
+        """Read-only audit timeline; callers cannot replace, append, or rewrite events."""
+        return tuple(self._audit)
+
     def record(self, event_type: str, details: Mapping[str, Any] | None = None) -> None:
-        # Avoid persisting arbitrary caller/tool payloads in the audit log.
-        self.audit.append(AuditEvent(event_type, self.mission_id, details=dict(details or {})))
+        if not isinstance(event_type, str) or not event_type.strip():
+            raise MissionError("Audit event type must be a non-empty string.")
+        if details is None:
+            copied_details: Mapping[str, Any] = {}
+        elif isinstance(details, Mapping):
+            copied_details = details
+        else:
+            raise MissionError("Audit event details must be a mapping.")
+        self._audit.append(AuditEvent(event_type.strip(), self.mission_id, details=copied_details))
 
     def transition(self, target: MissionState, reason: str = "") -> None:
         if not isinstance(target, MissionState) or target not in TRANSITIONS.get(self.state, set()):
@@ -237,8 +302,26 @@ class ToolSpec:
     contextual_handler: Callable[[Mapping[str, Any], "ExecutionControl"], Mapping[str, Any]] | None = None
 
     def __post_init__(self) -> None:
-        if not self.name or self.name != self.name.strip():
+        if not isinstance(self.name, str) or not self.name or self.name != self.name.strip():
             raise MissionError("Tool name must be a non-empty, trimmed string.")
+        if not isinstance(self.read_only, bool) or not isinstance(self.requires_approval, bool):
+            raise MissionError("read_only and requires_approval must be booleans.")
+
+        for attribute, label in (
+            ("allowed_arguments", "Allowed tool argument names"),
+            ("required_arguments", "Required tool argument names"),
+            ("allowed_targets", "Allowed tool targets"),
+        ):
+            value = getattr(self, attribute)
+            if isinstance(value, (str, bytes)) or not isinstance(value, (tuple, list)):
+                raise MissionError(f"{label} must be a sequence of non-empty strings.")
+            items = tuple(value)
+            if any(not isinstance(item, str) or not item or item != item.strip() for item in items):
+                raise MissionError(f"{label} must contain only non-empty, trimmed strings.")
+            if len(set(items)) != len(items):
+                raise MissionError(f"{label} must be unique.")
+            object.__setattr__(self, attribute, items)
+
         if (self.handler is None) == (self.contextual_handler is None):
             raise MissionError("Exactly one normal handler or contextual_handler must be provided.")
         if self.handler is not None and not callable(self.handler):
@@ -254,12 +337,16 @@ class ToolSpec:
                 raise MissionError("Tool timeout must be finite, greater than zero, and at most 24 hours.") from None
             if not math.isfinite(tool_timeout) or not 0 < tool_timeout <= 24 * 60 * 60:
                 raise MissionError("Tool timeout must be finite, greater than zero, and at most 24 hours.")
-        if len(set(self.allowed_arguments)) != len(self.allowed_arguments):
-            raise MissionError("Allowed tool argument names must be unique.")
         if not set(self.required_arguments).issubset(self.allowed_arguments):
             raise MissionError("Required tool arguments must be included in allowed_arguments.")
         if self.target_argument is not None:
-            if self.target_argument not in self.allowed_arguments or not self.allowed_targets:
+            if (
+                not isinstance(self.target_argument, str)
+                or not self.target_argument
+                or self.target_argument != self.target_argument.strip()
+                or self.target_argument not in self.allowed_arguments
+                or not self.allowed_targets
+            ):
                 raise MissionError("A target argument must be allowed and have an explicit target allowlist.")
         elif self.allowed_targets:
             raise MissionError("allowed_targets requires target_argument.")
@@ -409,7 +496,11 @@ class AuthorityKernel:
 
 
 class ToolGateway:
-    """Executes only registered in-process handlers; intentionally no shell or filesystem access."""
+    """Dispatch trusted, registered in-process handlers through an explicit policy boundary.
+
+    This gateway is not an operating-system sandbox. Handler implementations execute with
+    the Python process's privileges and must themselves be trusted and narrowly scoped.
+    """
 
     def __init__(self, authority: AuthorityKernel | None = None) -> None:
         self._authority = authority or AuthorityKernel()
@@ -433,6 +524,19 @@ class ToolGateway:
         spec = self._tools.get(tool_name) if isinstance(tool_name, str) else None
         return self._authority.decide(spec, arguments=arguments, approval=approval)
 
+    @staticmethod
+    def _has_pending_approval(mission: Mission, tool_name: str, fingerprint: str) -> bool:
+        pending = False
+        for event in mission.audit:
+            details = event.details
+            if details.get("tool") != tool_name or details.get("action_fingerprint") != fingerprint:
+                continue
+            if event.event_type == "tool.approval_requested":
+                pending = True
+            elif event.event_type == "tool.approval_consumed":
+                pending = False
+        return pending
+
     def invoke(
         self,
         mission: Mission,
@@ -444,24 +548,82 @@ class ToolGateway:
     ) -> ToolResult:
         from .control import ExecutionCancelled, ExecutionControl, ExecutionDeadlineExceeded
 
-        decision = self.authorize(tool_name, arguments=arguments, approval=approval)
-        spec = self._tools.get(tool_name) if isinstance(tool_name, str) else None
+        if not isinstance(mission, Mission):
+            raise MissionError("Tool invocation requires a Mission instance.")
+        if mission.state not in {MissionState.RUNNING, MissionState.AWAITING_APPROVAL}:
+            raise MissionError("Tools may only be invoked during an active mission.")
+        if not isinstance(tool_name, str) or not tool_name.strip():
+            raise MissionError("Tool name must be a non-empty string.")
+        tool_name = tool_name.strip()
+
+        # Snapshot caller-supplied data once, then authorize and execute that exact copy.
+        # This closes a check/use gap in which a mutable Mapping could change after preflight.
+        try:
+            normalized = _normalized_arguments(arguments)
+        except Exception:
+            normalized = {}
+            decision = PolicyDecision(PolicyEffect.DENY, "Tool arguments are invalid or exceed the allowed size.")
+            arguments_valid = False
+        else:
+            arguments_valid = True
+            spec_for_policy = self._tools.get(tool_name)
+            decision = self._authority.decide(
+                spec_for_policy, arguments=normalized, approval=approval
+            )
+        spec = self._tools.get(tool_name)
         mission.record("tool.policy_decision", {
             "tool": tool_name, "effect": decision.effect.value, "reason": decision.reason,
             "action_fingerprint": decision.action_fingerprint,
         })
-        if decision.effect is not PolicyEffect.ALLOW:
+        if not arguments_valid or decision.effect is PolicyEffect.DENY:
             raise MissionError(f"Tool invocation denied: {decision.reason}")
-        if mission.state not in {MissionState.RUNNING, MissionState.AWAITING_APPROVAL}:
-            raise MissionError("Tools may only be invoked during an active mission.")
+
+        if decision.effect is PolicyEffect.REQUIRE_APPROVAL:
+            if mission.state is MissionState.RUNNING:
+                mission.transition(
+                    MissionState.AWAITING_APPROVAL,
+                    "A registered action requires explicit action-bound approval.",
+                )
+                mission.record("tool.approval_requested", {
+                    "tool": tool_name,
+                    "action_fingerprint": decision.action_fingerprint,
+                    "reason": decision.reason,
+                })
+            elif not self._has_pending_approval(
+                mission, tool_name, decision.action_fingerprint or ""
+            ):
+                raise MissionError("Mission is awaiting approval for a different action.")
+            raise MissionError(f"Tool invocation requires approval: {decision.reason}")
+
+        requires_approval = spec.requires_approval or not spec.read_only
         if mission.state is MissionState.AWAITING_APPROVAL:
-            mission.transition(MissionState.RUNNING, "Approval validated for the exact requested action.")
+            if (
+                not requires_approval
+                or approval is None
+                or not self._has_pending_approval(
+                    mission, tool_name, decision.action_fingerprint or ""
+                )
+            ):
+                raise MissionError("Mission is awaiting approval for a different action.")
+            mission.transition(
+                MissionState.RUNNING,
+                "The exact pending action received a valid action-bound approval.",
+            )
+
+        if requires_approval:
+            # Record consumption before entering the handler; a failed action cannot silently
+            # replay the same in-memory approval request through this gateway.
+            mission.record("tool.approval_consumed", {
+                "tool": tool_name,
+                "action_fingerprint": decision.action_fingerprint,
+                "approval_id": approval.approval_id,
+            })
 
         if execution_control is None:
             control = ExecutionControl(timeout_seconds=spec.timeout_seconds)
         else:
             control = execution_control.child(spec.timeout_seconds)
-        normalized = _normalized_arguments(arguments)
+
         try:
             control.raise_if_stopped()
             if spec.contextual_handler is not None:
@@ -474,7 +636,10 @@ class ToolGateway:
             safe_output = _normalize_json_value(output)
             if not isinstance(safe_output, dict):
                 raise TypeError("Tool handlers must return a JSON object.")
-            encoded = json.dumps(safe_output, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
+            encoded = json.dumps(
+                safe_output, sort_keys=True, separators=(",", ":"),
+                ensure_ascii=False, allow_nan=False,
+            )
             if len(encoded.encode("utf-8")) > 256 * 1024:
                 raise ValueError("Tool output exceeds the 256 KiB limit.")
             control.raise_if_stopped()
