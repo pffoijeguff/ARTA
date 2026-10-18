@@ -129,13 +129,15 @@ class OidcJwksAuthenticator:
             raise IdentityError("JWKS key count is outside the allowed range.")
 
         keys: dict[str, tuple[str, str]] = {}
+        seen_kids: set[str] = set()
         for jwk_data in document["keys"]:
             if not isinstance(jwk_data, dict):
                 raise IdentityError("JWKS contains a malformed key.")
             kid = jwk_data.get("kid")
             alg = jwk_data.get("alg")
-            if not isinstance(kid, str) or not kid or kid != kid.strip() or kid in keys:
+            if not isinstance(kid, str) or not kid or kid != kid.strip() or kid in seen_kids:
                 raise IdentityError("JWKS key IDs must be unique, non-empty, trimmed strings.")
+            seen_kids.add(kid)
             if not isinstance(alg, str) or alg not in _SUPPORTED_ASYMMETRIC_ALGORITHMS:
                 raise IdentityError("JWKS keys must declare a supported asymmetric algorithm.")
             if _PRIVATE_JWK_FIELDS.intersection(jwk_data):
