@@ -124,3 +124,6 @@ The new checks lower several classes of accidental bypass but do not make this p
 The MissionRunner preflights the entire plan before executing any handler. Missing approvals return the mission to AWAITING_APPROVAL with action IDs and zero tool executions; any denied action blocks the plan before side effects; argument snapshots stop callers mutating a planned action after approval; and execution stops on the first tool failure. Verifier callback errors are converted to INCONCLUSIVE evidence rather than optimistic success.
 
 These are single-process controls. They do not protect against a compromised Python process, malicious in-process handler, forged Approval object, process crash, or tampering with in-memory state. Do not treat this runner as a sandbox or an authenticated approval service.
+
+
+The current evaluator now obtains time from an AuthorityKernel clock configured by the trusted runtime or test harness. Per-action requests cannot pass an arbitrary timestamp to make an expired approval appear valid. Production must keep clock configuration outside user-controlled mission data.

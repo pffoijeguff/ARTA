@@ -108,7 +108,6 @@ class MissionRunner:
         plan: MissionPlan,
         verifier: ActionVerifier,
         *,
-        now: str | None = None,
     ) -> MissionRunReport:
         if mission.state not in {
             MissionState.CREATED,
@@ -144,7 +143,6 @@ class MissionRunner:
                 action.tool_name,
                 action.arguments_copy(),
                 approval=action.approval,
-                now=now,
             )
             if decision.effect is PolicyEffect.REQUIRE_APPROVAL:
                 pending.append(action.action_id)
@@ -182,7 +180,6 @@ class MissionRunner:
                     action.tool_name,
                     action.arguments_copy(),
                     approval=action.approval,
-                    now=now,
                 )
             except MissionError:
                 mission.transition(MissionState.FAILED, "A planned tool action failed or lost authorization.")

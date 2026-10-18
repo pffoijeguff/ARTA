@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from arta.core import (
     Approval,
+    AuthorityKernel,
     EvidenceOutcome,
     Mission,
     MissionState,
@@ -24,7 +25,7 @@ def passing_verifier(action: PlannedAction, result):
 def test_runner_executes_and_verifies_a_read_only_mission_end_to_end() -> None:
     mission = Mission("Read and validate a report", ("report-read",))
     calls: list[str] = []
-    gateway = ToolGateway()
+    gateway = ToolGateway(AuthorityKernel(clock=lambda: NOW))
     gateway.register(ToolSpec(
         "report.read",
         lambda args: calls.append(args["path"]) or {"content": "fixture", "found": True},
@@ -37,7 +38,7 @@ def test_runner_executes_and_verifies_a_read_only_mission_end_to_end() -> None:
         PlannedAction("read-1", "report.read", "report-read", {"path": "reports/final.md"}),
     ))
 
-    report = MissionRunner(gateway).run(mission, plan, passing_verifier, now=NOW)
+    report = MissionRunner(gateway).run(mission, plan, passing_verifier)
 
     assert report.completed
     assert report.state is MissionState.COMPLETED
@@ -51,7 +52,7 @@ def test_runner_executes_and_verifies_a_read_only_mission_end_to_end() -> None:
 def test_runner_preflights_every_action_and_executes_nothing_until_approval_exists() -> None:
     mission = Mission("Read and update a report", ("report-read", "report-written"))
     calls: list[str] = []
-    gateway = ToolGateway()
+    gateway = ToolGateway(AuthorityKernel(clock=lambda: NOW))
     gateway.register(ToolSpec(
         "report.read",
         lambda args: calls.append("read") or {"read": True},
@@ -75,7 +76,7 @@ def test_runner_preflights_every_action_and_executes_nothing_until_approval_exis
     unapproved = PlannedAction("write-1", "report.write", "report-written", write_args)
     runner = MissionRunner(gateway)
 
-    pending = runner.run(mission, MissionPlan((read, unapproved)), passing_verifier, now=NOW)
+    pending = runner.run(mission, MissionPlan((read, unapproved)), passing_verifier)
 
     assert pending.state is MissionState.AWAITING_APPROVAL
     assert pending.pending_action_ids == ("write-1",)
@@ -93,7 +94,7 @@ def test_runner_preflights_every_action_and_executes_nothing_until_approval_exis
     approved_write = PlannedAction(
         "write-1", "report.write", "report-written", write_args, approval=approval
     )
-    completed = runner.run(mission, MissionPlan((read, approved_write)), passing_verifier, now=NOW)
+    completed = runner.run(mission, MissionPlan((read, approved_write)), passing_verifier)
 
     assert completed.completed
     assert completed.state is MissionState.COMPLETED
@@ -103,14 +104,14 @@ def test_runner_preflights_every_action_and_executes_nothing_until_approval_exis
 def test_denied_action_blocks_whole_plan_before_any_tool_runs() -> None:
     mission = Mission("Run only permitted actions", ("allowed", "forbidden"))
     calls: list[str] = []
-    gateway = ToolGateway()
+    gateway = ToolGateway(AuthorityKernel(clock=lambda: NOW))
     gateway.register(ToolSpec("safe.read", lambda args: calls.append("safe") or {"ok": True}))
     plan = MissionPlan((
         PlannedAction("safe-1", "safe.read", "allowed"),
         PlannedAction("unknown-1", "unregistered.tool", "forbidden"),
     ))
 
-    report = MissionRunner(gateway).run(mission, plan, passing_verifier, now=NOW)
+    report = MissionRunner(gateway).run(mission, plan, passing_verifier)
 
     assert report.state is MissionState.BLOCKED
     assert report.denied_action_ids == ("unknown-1",)
@@ -121,11 +122,11 @@ def test_denied_action_blocks_whole_plan_before_any_tool_runs() -> None:
 def test_plan_must_cover_each_acceptance_criterion() -> None:
     mission = Mission("Read two artifacts", ("artifact-a", "artifact-b"))
     calls: list[str] = []
-    gateway = ToolGateway()
+    gateway = ToolGateway(AuthorityKernel(clock=lambda: NOW))
     gateway.register(ToolSpec("safe.read", lambda args: calls.append("ran") or {"ok": True}))
     plan = MissionPlan((PlannedAction("read-a", "safe.read", "artifact-a"),))
 
-    report = MissionRunner(gateway).run(mission, plan, passing_verifier, now=NOW)
+    report = MissionRunner(gateway).run(mission, plan, passing_verifier)
 
     assert report.state is MissionState.BLOCKED
     assert calls == []
@@ -134,7 +135,7 @@ def test_plan_must_cover_each_acceptance_criterion() -> None:
 
 def test_verifier_failure_makes_final_mission_fail() -> None:
     mission = Mission("Check an artifact", ("artifact-valid",))
-    gateway = ToolGateway()
+    gateway = ToolGateway(AuthorityKernel(clock=lambda: NOW))
     gateway.register(ToolSpec("artifact.read", lambda args: {"content": "fixture"}))
     plan = MissionPlan((PlannedAction("read-1", "artifact.read", "artifact-valid"),))
 
@@ -142,7 +143,7 @@ def test_verifier_failure_makes_final_mission_fail() -> None:
         mission,
         plan,
         lambda action, result: (EvidenceOutcome.FAIL, "Fixture integrity check failed."),
-        now=NOW,
+        
     )
 
     assert not report.completed
@@ -152,14 +153,14 @@ def test_verifier_failure_makes_final_mission_fail() -> None:
 
 def test_verifier_exception_fails_closed_as_inconclusive() -> None:
     mission = Mission("Check an artifact", ("artifact-valid",))
-    gateway = ToolGateway()
+    gateway = ToolGateway(AuthorityKernel(clock=lambda: NOW))
     gateway.register(ToolSpec("artifact.read", lambda args: {"content": "fixture"}))
     plan = MissionPlan((PlannedAction("read-1", "artifact.read", "artifact-valid"),))
 
     def broken_verifier(action, result):
         raise RuntimeError("must not be persisted")
 
-    report = MissionRunner(gateway).run(mission, plan, broken_verifier, now=NOW)
+    report = MissionRunner(gateway).run(mission, plan, broken_verifier)
 
     assert report.state is MissionState.FAILED
     assert mission.evidence[0].outcome is EvidenceOutcome.INCONCLUSIVE
@@ -170,7 +171,7 @@ def test_verifier_exception_fails_closed_as_inconclusive() -> None:
 def test_planned_action_uses_validated_snapshot_not_later_mutated_arguments() -> None:
     mission = Mission("Read the approved path", ("path-read",))
     calls: list[str] = []
-    gateway = ToolGateway()
+    gateway = ToolGateway(AuthorityKernel(clock=lambda: NOW))
     gateway.register(ToolSpec(
         "safe.read",
         lambda args: calls.append(args["path"]) or {"ok": True},
@@ -183,7 +184,7 @@ def test_planned_action_uses_validated_snapshot_not_later_mutated_arguments() ->
     planned = PlannedAction("read-1", "safe.read", "path-read", arguments)
     arguments["path"] = "reports/other.md"
 
-    report = MissionRunner(gateway).run(mission, MissionPlan((planned,)), passing_verifier, now=NOW)
+    report = MissionRunner(gateway).run(mission, MissionPlan((planned,)), passing_verifier)
 
     assert report.completed
     assert calls == ["reports/final.md"]
@@ -192,7 +193,7 @@ def test_planned_action_uses_validated_snapshot_not_later_mutated_arguments() ->
 def test_runtime_failure_stops_later_actions_and_reports_partial_results() -> None:
     mission = Mission("Run two actions", ("first-action", "second-action"))
     calls: list[str] = []
-    gateway = ToolGateway()
+    gateway = ToolGateway(AuthorityKernel(clock=lambda: NOW))
 
     def fail(_args):
         calls.append("first")
@@ -205,7 +206,7 @@ def test_runtime_failure_stops_later_actions_and_reports_partial_results() -> No
         PlannedAction("action-2", "second", "second-action"),
     ))
 
-    report = MissionRunner(gateway).run(mission, plan, passing_verifier, now=NOW)
+    report = MissionRunner(gateway).run(mission, plan, passing_verifier)
 
     assert report.state is MissionState.FAILED
     assert report.failed_action_id == "action-1"

@@ -87,7 +87,7 @@ Implemented in this slice:
 - A tool gateway that only invokes explicitly registered in-process handlers.
 - A MissionRunner that preflights the complete plan before any tool runs, pauses when approvals are missing, executes authorized actions, and requests explicit evidence from a verifier callback.
 - Exact argument contracts and explicit target allowlists for registered tools.
-- Action-bound approvals using a stable SHA-256 fingerprint over the tool name and complete JSON arguments; approvals expire and are rejected if revoked, future-dated, expired, or reused for a changed action.
+- Action-bound approvals using a stable SHA-256 fingerprint over the tool name and complete JSON arguments; approvals expire and are rejected if revoked, future-dated, expired, or reused for a changed action. Evaluation time comes from a trusted runtime-configured clock, not the incoming action request.
 - Structured evidence records scoped to an acceptance criterion, with PASS / FAIL / INCONCLUSIVE outcomes, source-action IDs, timestamps, and summaries.
 - Verification fails closed if required evidence is missing, the newest evidence fails or is inconclusive, or the latest observations conflict.
 - Audit events record policy outcomes, action fingerprints, and evidence metadata without recording raw tool arguments or exception messages.

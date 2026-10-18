@@ -191,15 +191,15 @@ def test_invalid_or_naive_evidence_timestamp_is_rejected() -> None:
 
 
 def test_unknown_tool_and_unregistered_name_fail_closed() -> None:
-    assert AuthorityKernel().decide(None).effect is PolicyEffect.DENY
+    assert AuthorityKernel(clock=lambda: NOW).decide(None).effect is PolicyEffect.DENY
     item = mission("report-created")
     with pytest.raises(MissionError, match="denied"):
-        ToolGateway().invoke(item, "not-registered")
+        ToolGateway(AuthorityKernel(clock=lambda: NOW)).invoke(item, "not-registered")
 
 
 def test_read_only_tool_requires_registration_and_exact_argument_contract() -> None:
     item = mission("report-created")
-    gateway = ToolGateway()
+    gateway = ToolGateway(AuthorityKernel(clock=lambda: NOW))
     gateway.register(ToolSpec(
         "report.read",
         lambda args: {"found": True},
@@ -219,13 +219,13 @@ def test_read_only_tool_requires_registration_and_exact_argument_contract() -> N
 def test_write_action_requires_action_bound_approval() -> None:
     item = mission("report-created")
     tool = write_tool()
-    gateway = ToolGateway()
+    gateway = ToolGateway(AuthorityKernel(clock=lambda: NOW))
     gateway.register(tool)
     args = {"path": "reports/final.md", "content": "verified"}
     with pytest.raises(MissionError, match="approval"):
-        gateway.invoke(item, tool.name, args, now=NOW)
+        gateway.invoke(item, tool.name, args)
     approval = valid_approval(tool, args)
-    result = gateway.invoke(item, tool.name, args, approval=approval, now=NOW)
+    result = gateway.invoke(item, tool.name, args, approval=approval)
     assert result.success
     assert result.output == {"written": "reports/final.md"}
 
@@ -234,8 +234,8 @@ def test_approval_cannot_be_reused_after_arguments_change() -> None:
     tool = write_tool()
     args = {"path": "reports/final.md", "content": "verified"}
     approval = valid_approval(tool, args)
-    result = AuthorityKernel().decide(
-        tool, arguments={**args, "content": "different"}, approval=approval, now=NOW
+    result = AuthorityKernel(clock=lambda: NOW).decide(
+        tool, arguments={**args, "content": "different"}, approval=approval
     )
     assert result.effect is PolicyEffect.DENY
     assert result.reason == "Approval does not match the requested action."
@@ -254,14 +254,14 @@ def test_approval_cannot_authorize_a_different_tool_or_target() -> None:
         target_argument="path",
         allowed_targets=("reports/final.md",),
     )
-    assert AuthorityKernel().decide(
-        altered_tool, arguments=args, approval=approval, now=NOW
+    assert AuthorityKernel(clock=lambda: NOW).decide(
+        altered_tool, arguments=args, approval=approval
     ).effect is PolicyEffect.DENY
-    assert AuthorityKernel().decide(
+    assert AuthorityKernel(clock=lambda: NOW).decide(
         tool,
         arguments={"path": "reports/draft.md", "content": "verified"},
         approval=approval,
-        now=NOW,
+        
     ).effect is PolicyEffect.DENY
 
 
@@ -269,23 +269,23 @@ def test_expired_future_denied_and_revoked_approvals_do_not_authorize() -> None:
     tool = write_tool()
     args = {"path": "reports/final.md", "content": "verified"}
     approval = valid_approval(tool, args)
-    kernel = AuthorityKernel()
+    kernel = AuthorityKernel(clock=lambda: NOW)
     expired = Approval(**{**approval.__dict__, "expires_at": "2026-10-18T08:00:00+00:00"})
     future = Approval(**{**approval.__dict__, "approved_at": "2026-10-18T08:01:00+00:00"})
     revoked = Approval(**{**approval.__dict__, "status": ApprovalStatus.REVOKED})
-    assert kernel.decide(tool, arguments=args, approval=expired, now=NOW).effect is PolicyEffect.DENY
-    assert kernel.decide(tool, arguments=args, approval=future, now=NOW).effect is PolicyEffect.DENY
-    assert kernel.decide(tool, arguments=args, approval=revoked, now=NOW).effect is PolicyEffect.DENY
+    assert kernel.decide(tool, arguments=args, approval=expired).effect is PolicyEffect.DENY
+    assert kernel.decide(tool, arguments=args, approval=future).effect is PolicyEffect.DENY
+    assert kernel.decide(tool, arguments=args, approval=revoked).effect is PolicyEffect.DENY
 
 
 def test_invalid_arguments_non_finite_values_and_circular_data_are_denied() -> None:
     tool = ToolSpec("report.read", lambda args: {"ok": True}, allowed_arguments=("value",))
-    kernel = AuthorityKernel()
-    assert kernel.decide(tool, arguments={"value": float("nan")}, now=NOW).effect is PolicyEffect.DENY
+    kernel = AuthorityKernel(clock=lambda: NOW)
+    assert kernel.decide(tool, arguments={"value": float("nan")}).effect is PolicyEffect.DENY
     circular: dict[str, object] = {}
     circular["self"] = circular
-    assert kernel.decide(tool, arguments=circular, now=NOW).effect is PolicyEffect.DENY
-    assert kernel.decide(tool, arguments=["not", "an", "object"], now=NOW).effect is PolicyEffect.DENY  # type: ignore[arg-type]
+    assert kernel.decide(tool, arguments=circular).effect is PolicyEffect.DENY
+    assert kernel.decide(tool, arguments=["not", "an", "object"]).effect is PolicyEffect.DENY  # type: ignore[arg-type]
 
 
 def test_action_fingerprint_is_stable_across_key_order_but_changes_with_values() -> None:
@@ -298,7 +298,7 @@ def test_action_fingerprint_is_stable_across_key_order_but_changes_with_values()
 
 def test_tool_failure_audit_does_not_leak_exception_message() -> None:
     item = mission("report-created")
-    gateway = ToolGateway()
+    gateway = ToolGateway(AuthorityKernel(clock=lambda: NOW))
     gateway.register(ToolSpec("broken", lambda args: (_ for _ in ()).throw(RuntimeError("secret material"))))
     with pytest.raises(MissionError) as error:
         gateway.invoke(item, "broken")
@@ -309,7 +309,7 @@ def test_tool_failure_audit_does_not_leak_exception_message() -> None:
 
 def test_non_json_tool_result_is_rejected_and_audited() -> None:
     item = mission("report-created")
-    gateway = ToolGateway()
+    gateway = ToolGateway(AuthorityKernel(clock=lambda: NOW))
     gateway.register(ToolSpec("bad-output", lambda args: {"bad": object()}))
     with pytest.raises(MissionError, match="failed"):
         gateway.invoke(item, "bad-output")
@@ -320,7 +320,7 @@ def test_non_json_tool_result_is_rejected_and_audited() -> None:
 def test_tool_is_not_executed_for_a_non_active_mission() -> None:
     item = Mission("goal", ("criterion",))
     calls: list[int] = []
-    gateway = ToolGateway()
+    gateway = ToolGateway(AuthorityKernel(clock=lambda: NOW))
     gateway.register(ToolSpec("counter", lambda args: calls.append(1) or {"ok": True}))
     with pytest.raises(MissionError, match="active mission"):
         gateway.invoke(item, "counter")

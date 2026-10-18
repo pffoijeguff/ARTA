@@ -312,13 +312,16 @@ def create_approval_record(
 class AuthorityKernel:
     """Default-deny policy for registered tools, narrow argument contracts, and bounded approvals."""
 
+    def __init__(self, clock: Callable[[], str] | None = None) -> None:
+        # Clock injection is configured by the trusted runtime/test harness, never per action.
+        self._clock = clock or _now
+
     def decide(
         self,
         tool: ToolSpec | None,
         *,
         arguments: Mapping[str, Any] | None = None,
         approval: Approval | None = None,
-        now: str | None = None,
     ) -> PolicyDecision:
         if tool is None:
             return PolicyDecision(PolicyEffect.DENY, "Tool is not registered.")
@@ -359,7 +362,7 @@ class AuthorityKernel:
         try:
             issued = _parse_timestamp(approval.approved_at)
             expiry = _parse_timestamp(approval.expires_at)
-            current = _parse_timestamp(now or _now())
+            current = _parse_timestamp(self._clock())
         except (ValueError, TypeError):
             return PolicyDecision(PolicyEffect.DENY, "Approval or evaluation timestamp is invalid.", action_hash)
         if expiry <= issued or issued > current or current >= expiry:
@@ -387,11 +390,10 @@ class ToolGateway:
         arguments: Mapping[str, Any] | None = None,
         *,
         approval: Approval | None = None,
-        now: str | None = None,
     ) -> PolicyDecision:
         """Preflight a tool action without executing its handler."""
         spec = self._tools.get(tool_name) if isinstance(tool_name, str) else None
-        return self._authority.decide(spec, arguments=arguments, approval=approval, now=now)
+        return self._authority.decide(spec, arguments=arguments, approval=approval)
 
     def invoke(
         self,
@@ -400,9 +402,8 @@ class ToolGateway:
         arguments: Mapping[str, Any] | None = None,
         *,
         approval: Approval | None = None,
-        now: str | None = None,
     ) -> ToolResult:
-        decision = self.authorize(tool_name, arguments=arguments, approval=approval, now=now)
+        decision = self.authorize(tool_name, arguments=arguments, approval=approval)
         spec = self._tools.get(tool_name) if isinstance(tool_name, str) else None
         mission.record("tool.policy_decision", {
             "tool": tool_name, "effect": decision.effect.value, "reason": decision.reason,
