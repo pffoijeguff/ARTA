@@ -354,11 +354,17 @@ class MissionRunner:
 
         pending_actions: list[tuple[PlannedAction, PolicyDecision]] = []
         denied: list[str] = []
+        seen_approval_ids: set[str] = set()
         for action in plan.actions:
             stopped = self._stop_report(mission, mission_control)
             if stopped is not None:
                 return stopped
             approval = self._current_approval(action)
+            if approval is not None:
+                if approval.approval_id in seen_approval_ids:
+                    denied.append(action.action_id)
+                    continue
+                seen_approval_ids.add(approval.approval_id)
             decision = self._gateway.authorize(
                 action.tool_name,
                 action.arguments_copy(),
@@ -442,6 +448,34 @@ class MissionRunner:
                 )
 
             fingerprint = fingerprint_action(action.tool_name, action.arguments_copy())
+            if self._store is not None and approval is not None:
+                try:
+                    self._store.consume_approval(
+                        approval.approval_id,
+                        mission_id=mission.mission_id,
+                        action_fingerprint=fingerprint,
+                        signature=approval.signature,
+                    )
+                except StoreError:
+                    mission.record("mission.approval_consumption_failed", {
+                        "action_id": action.action_id,
+                        "approval_id": approval.approval_id,
+                        "error_type": "StoreError",
+                    })
+                    mission.transition(
+                        MissionState.BLOCKED,
+                        "The approval could not be consumed atomically; no tool was invoked.",
+                    )
+                    self._checkpoint(mission)
+                    return MissionRunReport(
+                        mission_id=mission.mission_id,
+                        state=mission.state,
+                        completed=False,
+                        tool_results=tuple(result for _, result in results),
+                        denied_action_ids=(action.action_id,),
+                        failed_action_id=action.action_id,
+                        reason="Approval was no longer active or could not be consumed exactly once; action was not invoked.",
+                    )
             if self._store is not None:
                 self._store.record_action_event(
                     mission.mission_id, action.action_id, action.tool_name, fingerprint, "prepared"

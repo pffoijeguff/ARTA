@@ -655,7 +655,30 @@ class SQLiteMissionStore:
             for event_row in rows[1:]:
                 event = json.loads(event_row["event_json"])
                 if event.get("kind") == "revoked" and expected_status is ApprovalStatus.APPROVED:
+                    if event.get("approval_id") != approval_id:
+                        raise StoreIntegrityError(f"Approval revocation identity mismatch for {approval_id}.")
+                    if not isinstance(event.get("actor_id"), str) or not event["actor_id"].strip():
+                        raise StoreIntegrityError(f"Approval revocation actor is invalid for {approval_id}.")
+                    if not isinstance(event.get("reason"), str) or not event["reason"].strip():
+                        raise StoreIntegrityError(f"Approval revocation reason is invalid for {approval_id}.")
+                    try:
+                        _safe_timestamp(event.get("recorded_at"), "Approval revocation time")
+                    except StoreError:
+                        raise StoreIntegrityError(f"Approval revocation time is invalid for {approval_id}.") from None
                     expected_status = ApprovalStatus.REVOKED
+                elif event.get("kind") == "consumed" and expected_status is ApprovalStatus.APPROVED:
+                    if (
+                        event.get("approval_id") != approval_id
+                        or not isinstance(event.get("mission_id"), str)
+                        or not event["mission_id"].strip()
+                        or event.get("action_fingerprint") != row["action_fingerprint"]
+                    ):
+                        raise StoreIntegrityError(f"Approval consumption identity mismatch for {approval_id}.")
+                    try:
+                        _safe_timestamp(event.get("consumed_at"), "Approval consumption time")
+                    except StoreError:
+                        raise StoreIntegrityError(f"Approval consumption time is invalid for {approval_id}.") from None
+                    expected_status = ApprovalStatus.CONSUMED
                 else:
                     raise StoreIntegrityError(f"Approval lifecycle event is invalid for {approval_id}.")
             if row["status"] != expected_status.value:
@@ -669,6 +692,74 @@ class SQLiteMissionStore:
                 status=ApprovalStatus(row["status"]),
                 signature=row["signature"],
             )
+
+    def consume_approval(
+        self,
+        approval_id: str,
+        *,
+        mission_id: str,
+        action_fingerprint: str,
+        signature: str | None,
+    ) -> Approval:
+        """Atomically consume an active approval for one mission and exact action.
+
+        Consumption is globally single-use across missions and store reopenings. It is
+        committed before the handler is entered; an interrupted attempt therefore needs
+        a fresh approval rather than risking a replay after an uncertain outcome.
+        """
+        if not isinstance(approval_id, str) or not approval_id.strip():
+            raise StoreError("Approval id must not be empty.")
+        if not isinstance(mission_id, str) or not mission_id.strip():
+            raise StoreError("A mission id is required to consume an approval.")
+        if not _is_sha256(action_fingerprint):
+            raise StoreError("Action fingerprint must be a lowercase SHA-256 digest.")
+        if signature is not None and not _is_sha256(signature):
+            raise StoreError("Approval signature must be a lowercase HMAC-SHA256 digest.")
+
+        with self._transaction():
+            # get_approval verifies the record hash and complete append-only lifecycle.
+            current = self.get_approval(approval_id.strip())
+            if current is None:
+                raise StoreError("Approval was not found.")
+            if current.status is not ApprovalStatus.APPROVED:
+                raise StoreError("Approval is not active and cannot be consumed again.")
+            if current.action_fingerprint != action_fingerprint:
+                raise StoreError("Approval does not match the exact action being consumed.")
+            if current.signature != signature:
+                raise StoreError("Approval signature does not match the persisted record.")
+            if not self._connection.execute(
+                "SELECT 1 FROM missions WHERE mission_id=?", (mission_id.strip(),)
+            ).fetchone():
+                raise StoreError("Mission must be persisted before consuming its approval.")
+
+            consumed_at = _now()
+            event = {
+                "kind": "consumed",
+                "approval_id": approval_id.strip(),
+                "mission_id": mission_id.strip(),
+                "action_fingerprint": action_fingerprint,
+                "consumed_at": consumed_at,
+            }
+            self._append_chain_event_locked(
+                "approval_audit_events", "approval_id", approval_id.strip(), event
+            )
+            changed = self._connection.execute(
+                "UPDATE approvals SET status=?, updated_at=? "
+                "WHERE approval_id=? AND status=?",
+                (
+                    ApprovalStatus.CONSUMED.value,
+                    consumed_at,
+                    approval_id.strip(),
+                    ApprovalStatus.APPROVED.value,
+                ),
+            ).rowcount
+            if changed != 1:
+                raise StoreError("Approval was concurrently consumed or revoked.")
+
+        consumed = self.get_approval(approval_id.strip())
+        if consumed is None or consumed.status is not ApprovalStatus.CONSUMED:
+            raise StoreIntegrityError(f"Consumed approval could not be verified: {approval_id}.")
+        return consumed
 
     def revoke_approval(self, approval_id: str, *, actor_id: str, reason: str) -> Approval:
         if not isinstance(actor_id, str) or not actor_id.strip():

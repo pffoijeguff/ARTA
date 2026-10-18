@@ -124,3 +124,14 @@ This file records durable design choices. A decision may be revised, but changes
 **Rationale:** A constrained, auditable write capability tests the complete policy → approval → tool → before/after verification path without granting arbitrary filesystem or shell access.
 
 **Consequences:** The adapter improves defense in depth but is not an OS sandbox and cannot claim complete protection from hostile same-user races. OS-level containment, authenticated identities, and real-adapter cancellation remain release blockers.
+
+
+## ADR-0012 — Persisted approvals are single-use
+
+**Status:** Accepted for the prototype.
+
+**Decision:** A persisted action-bound approval is consumed atomically in SQLite before the associated handler is entered. The consumption event is appended to the approval's hash chain and records the mission ID, exact action fingerprint, and timestamp. Reuse is denied globally, not merely within one mission's in-memory audit history.
+
+**Reason:** Per-mission replay protection alone permits a copied approval record to be replayed in a different mission. Conservative stop-and-reapprove behavior is preferable to silently reusing permission after an ambiguous attempt.
+
+**Consequences:** A crash after consumption may spend the approval even if no effect occurred; the user must approve a new attempt. This closes a persistence-level replay path, but does not authenticate `approver_id`, protect against a compromised process/database operator, or create a distributed authorization service.

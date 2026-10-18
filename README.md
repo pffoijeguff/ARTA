@@ -184,3 +184,10 @@ The SQLite milestone now persists mission snapshots, approval lifecycle state, h
 ## Status and contribution
 
 The project is at the specification/foundation stage with an initial executable mission-kernel slice. Contributions that improve precision, threat coverage, acceptance criteria, and independently testable implementation are especially useful. Please do not describe a feature as implemented until code and evidence support that claim.
+
+
+## Single-use approval behavior
+
+When a mission runs with `SQLiteMissionStore`, persisted approvals are consumed atomically before an approved action's handler starts. A consumed approval cannot be reused by another mission, and duplicate approval identifiers in one plan are rejected during preflight. If an attempt is interrupted after consumption, that approval remains spent and a new explicit approval is required.
+
+This control prevents persisted approval reuse within the prototype's SQLite boundary; it does not authenticate human approvers or provide an operating-system sandbox.

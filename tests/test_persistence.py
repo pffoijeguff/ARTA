@@ -187,6 +187,67 @@ def test_approval_records_persist_and_revocation_is_audited() -> None:
             )
 
 
+
+def test_persisted_approval_consumption_survives_reopen_and_cannot_repeat(tmp_path) -> None:
+    approval = approval_for_write()
+    path = tmp_path / "single-use-approvals.sqlite3"
+    first_mission = Mission("Perform the approved write", ("report-written",))
+
+    with SQLiteMissionStore(path) as store:
+        store.put_approval(approval)
+        store.save_mission(first_mission)
+        consumed = store.consume_approval(
+            approval.approval_id,
+            mission_id=first_mission.mission_id,
+            action_fingerprint=approval.action_fingerprint,
+            signature=approval.signature,
+        )
+        assert consumed.status is ApprovalStatus.CONSUMED
+        assert not HmacApprovalAuthority(TEST_APPROVAL_KEY).verify(consumed)
+        audit_rows = store._verify_chain_locked(
+            "approval_audit_events", "approval_id", approval.approval_id
+        )
+        assert len(audit_rows) == 2
+        event = json.loads(audit_rows[-1]["event_json"])
+        assert event["kind"] == "consumed"
+        assert event["mission_id"] == first_mission.mission_id
+        assert event["action_fingerprint"] == approval.action_fingerprint
+
+    second_mission = Mission("Try the same approval again", ("report-written",))
+    with SQLiteMissionStore(path) as reopened:
+        reopened.save_mission(second_mission)
+        loaded = reopened.get_approval(approval.approval_id)
+        assert loaded is not None and loaded.status is ApprovalStatus.CONSUMED
+        with pytest.raises(StoreError, match="not active"):
+            reopened.consume_approval(
+                approval.approval_id,
+                mission_id=second_mission.mission_id,
+                action_fingerprint=approval.action_fingerprint,
+                signature=approval.signature,
+            )
+
+
+def test_consumed_approval_projection_cannot_be_reverted_without_detection() -> None:
+    approval = approval_for_write()
+    mission = Mission("Consume one approval", ("report-written",))
+    with SQLiteMissionStore(":memory:") as store:
+        store.put_approval(approval)
+        store.save_mission(mission)
+        store.consume_approval(
+            approval.approval_id,
+            mission_id=mission.mission_id,
+            action_fingerprint=approval.action_fingerprint,
+            signature=approval.signature,
+        )
+        store._connection.execute(
+            "UPDATE approvals SET status='approved' WHERE approval_id=?",
+            (approval.approval_id,),
+        )
+        with pytest.raises(StoreIntegrityError, match="status does not match"):
+            store.get_approval(approval.approval_id)
+
+
+
 def test_duplicate_approval_ids_and_invalid_approval_records_are_rejected() -> None:
     approval = approval_for_write()
     with SQLiteMissionStore(":memory:") as store:

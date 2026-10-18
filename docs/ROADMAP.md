@@ -146,3 +146,10 @@ The checklist above is not a claim that any milestone is complete. Update milest
 **Delivered:** An optional allowlist-only workspace adapter with bounded UTF-8 reads, exact-path policy contracts, traversal/symlink checks, create-only semantics for new files, compare-before-write for replacements, temporary-file staging, atomic replacement, and before/after SHA-256 evidence. The write capability is registered as non-read-only and remains behind the Authority Kernel's exact-action approval gate. Tests cover signed-approval replay resistance, stale-write conflicts, symlinked paths, size limits, and failure cleanup.
 
 **Boundary:** This is a narrow local adapter, not an OS sandbox. It exposes no delete, directory listing, shell, arbitrary path, or process launch. Authenticated approver identity, protection from hostile same-user filesystem races, and production-grade OS isolation remain open.
+
+
+## Single-use persisted-approval milestone — 2026-10-18
+
+**Delivered in this change:** SQLite-backed approvals gain an atomic, append-only `consumed` lifecycle state. Consumption is bound to the exact action fingerprint and persisted mission, runs before handler entry, and cannot be reused across missions or after reopening the store. Whole-plan preflight rejects duplicate approval IDs before execution. Regression tests cover lifecycle integrity, replay after reopening, and a second mission attempting to reuse the same approval.
+
+**Boundary:** This does not establish human identity. Approval creation must still follow real authentication at a trusted UI/API boundary. It is not a substitute for an OS sandbox or a production multi-user authorization service.
