@@ -17,6 +17,9 @@ from typing import Any, Callable, Mapping
 from uuid import uuid4
 
 
+MAX_TOOL_INVOCATIONS_PER_MISSION = 128
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -604,6 +607,21 @@ class ToolGateway:
             raise MissionError(f"Tool invocation requires approval: {decision.reason}")
 
         requires_approval = spec.requires_approval or not spec.read_only
+        invocation_count = sum(
+            event.event_type == "tool.invocation_started" for event in mission.audit
+        )
+        if invocation_count >= MAX_TOOL_INVOCATIONS_PER_MISSION:
+            mission.record("mission.action_budget_exhausted", {
+                "budget": "tool_invocations",
+                "limit": MAX_TOOL_INVOCATIONS_PER_MISSION,
+                "attempted_tool": tool_name,
+            })
+            mission.transition(
+                MissionState.BLOCKED,
+                "The per-mission tool invocation budget was exhausted.",
+            )
+            raise MissionError("Mission tool invocation budget exhausted.")
+
         if requires_approval and approval is None:
             # Normally intercepted by REQUIRE_APPROVAL; keep this guard independent of policy overrides.
             raise MissionError("This action requires a valid action-bound approval.")
@@ -638,6 +656,10 @@ class ToolGateway:
         else:
             control = execution_control.child(spec.timeout_seconds)
 
+        mission.record("tool.invocation_started", {
+            "tool": tool_name,
+            "action_fingerprint": decision.action_fingerprint,
+        })
         try:
             control.raise_if_stopped()
             if spec.contextual_handler is not None:
