@@ -6,7 +6,7 @@ The project should advance through a few meaningful milestones. Each milestone h
 
 ## Progress snapshot — 2026-10-18
 
-The Python kernel now includes structured evidence, action-bound approvals, strict tool contracts, a MissionRunner, SQLite persistence, a durable action journal, cooperative cancellation/deadlines, conservative post-restart reconciliation, and an allowlisted workspace adapter with compare-before-write semantics. Recovery marks interrupted actions and blocks non-terminal missions for review; it does not resume lost plans. Authenticated identities, an OS sandbox, interruptible real adapters, encrypted storage, automatic safe resumption, and the real UI remain open.
+The Python kernel includes structured evidence, action-bound approvals, SQLite persistence and recovery, cooperative cancellation, and allowlisted workspace writes. The latest security slice adds configured-key JWT validation and trusted scope-based approval issuance, plus a Linux BubblewrapSandbox that launches allowlisted processes with private tmpfs workspace, no network namespace sharing, and bounded resources. The full product is still a prototype: no login/token-acquisition UI, automatic safe resumption, encrypted storage, interruptible real adapters, real connector runtime, or production Command Center is delivered. Real Bubblewrap integration testing is opt-in and is still a deployment release gate.
 
 ## M0 — Project foundation and contracts
 
@@ -44,7 +44,7 @@ Deliverables:
 - timeout, cancellation, and bounded recovery have tested outcomes;
 - a clean checkout can run the documented checks.
 
-**Current status:** The tested MissionRunner now has basic durable journaling and cooperative cancellation/deadline boundaries. This is still not the full M1 release gate: hard interruption of blocking work, cancellation acknowledgement, crash/restart reconciliation, authenticated approvals, and the operating-system sandbox remain open.
+**Current status:** MissionRunner journaling, cooperative cancellation, and conservative crash/restart reconciliation are tested. JWT verification and a Bubblewrap process boundary now exist as optional components, but this is still not the full M1 release gate: real-host sandbox validation, integration of authenticated identity into an actual UI/API, hard interruption/cancellation acknowledgement for real adapters, and end-to-end production acceptance remain open.
 
 ## M2 — Controlled state changes
 
@@ -124,7 +124,7 @@ The checklist above is not a claim that any milestone is complete. Update milest
 
 **Delivered since the initial journal:** Conservative recovery through `MissionRunner.recover_interrupted_mission()`. It classifies `prepared` actions as interrupted before handler entry, turns `started` actions into `unknown`, marks any non-terminal mission `BLOCKED`, and emits a durable recovery-required audit event. Repeating recovery is a no-op for already-terminal missions; no tool is replayed.
 
-**Not yet delivered:** Automatic or safe mission resumption after a process crash. The plan and raw tool outputs are not persisted, so resumed execution cannot yet re-establish the exact plan or independently verify past effects. A started/unknown action must be reconciled by a human before any replacement action is planned. Also pending are authenticated approver identities, encryption at rest, transactional integrations with real tools, hard interruption of blocking work, and an OS-level sandbox.
+**Not yet delivered:** Automatic or safe mission resumption after a process crash. The plan and raw tool outputs are not persisted, so resumed execution cannot yet re-establish the exact plan or independently verify past effects. A started/unknown action must be reconciled by a human before any replacement action is planned. Also pending are login/token acquisition and lifecycle management around authenticated approvers, encryption at rest, transactional integrations with real tools, hard interruption of blocking work, and deployment-verified sandbox containment.
 
 
 ## Cooperative execution-control milestone — 2026-10-18
@@ -145,7 +145,7 @@ The checklist above is not a claim that any milestone is complete. Update milest
 
 **Delivered:** An optional allowlist-only workspace adapter with bounded UTF-8 reads, exact-path policy contracts, traversal/symlink checks, create-only semantics for new files, compare-before-write for replacements, temporary-file staging, atomic replacement, and before/after SHA-256 evidence. The write capability is registered as non-read-only and remains behind the Authority Kernel's exact-action approval gate. Tests cover signed-approval replay resistance, stale-write conflicts, symlinked paths, size limits, and failure cleanup.
 
-**Boundary:** This is a narrow local adapter, not an OS sandbox. It exposes no delete, directory listing, shell, arbitrary path, or process launch. Authenticated approver identity, protection from hostile same-user filesystem races, and production-grade OS isolation remain open.
+**Boundary:** This is a narrow local adapter, not an OS sandbox. It exposes no delete, directory listing, shell, arbitrary path, or process launch. The separate Bubblewrap component offers temporary OS-level process isolation for explicit command tasks, but does not eliminate same-user/host-kernel risks or automatically wrap workspace callbacks. The JWT approval primitive still needs a real login/API integration.
 
 
 ## Single-use persisted-approval milestone — 2026-10-18
@@ -153,3 +153,15 @@ The checklist above is not a claim that any milestone is complete. Update milest
 **Delivered in this change:** SQLite-backed approvals gain an atomic, append-only `consumed` lifecycle state. Consumption is bound to the exact action fingerprint and persisted mission, runs before handler entry, and cannot be reused across missions or after reopening the store. Whole-plan preflight rejects duplicate approval IDs before execution. Regression tests cover lifecycle integrity, replay after reopening, and a second mission attempting to reuse the same approval.
 
 **Boundary:** This does not establish human identity. Approval creation must still follow real authentication at a trusted UI/API boundary. It is not a substitute for an OS sandbox or a production multi-user authorization service.
+
+## JWT-backed trusted approval milestone — 2026-10-18
+
+**Implemented:** `JwtPrincipalAuthenticator` validates tokens against an operator-configured asymmetric public-key ring, fixed issuer/audience, fixed per-key algorithms, required claims, expiration, issue time, and bounded token lifetime. `TrustedApprovalService` requires global and tool-specific scopes, derives `approver_id` from the verified subject, caps approval lifetime, HMAC-signs the exact action, and persists the signed approval.
+
+**Boundary:** There is no embedded identity provider, login page, OAuth/OIDC token-acquisition flow, remote JWKS fetching/rotation, MFA policy, or session-revocation service. Deployment must provision keys and scopes through a trusted configuration process and must not let models bypass this service.
+
+## Linux Bubblewrap process-boundary milestone — 2026-10-18
+
+**Implemented:** An optional `BubblewrapSandbox` accepts only configured executable aliases, passes argv without a host shell, replaces the host environment, requires user/PID/network/IPC/UTS namespaces, mounts the OS runtime read-only, copies source into size-capped private tmpfs, filters common credential/config filenames and VCS metadata, applies resource limits, caps output in memory, probes isolation before launching the task, and kills the supervisor on wall-clock timeout. Workspace mutations are ephemeral, and unsupported hosts/configurations fail closed rather than executing directly.
+
+**Verification boundary:** Unit tests cover command construction and mocked process lifecycle. A real Bubblewrap integration test is opt-in because user-namespace support varies by host; running it on the deployment kernel and reviewing the concrete runtime configuration remain release gates. The core ToolGateway callbacks remain in-process unless a trusted runtime explicitly routes them to this class. No security certification or protection against kernel exploits is claimed.

@@ -109,10 +109,10 @@ The executable Python mission-kernel slice (with optional SQLite persistence) im
 Important residual risks:
 - The caller constructing an Approval record must authenticate the approver; the object is not a signature and cannot establish identity on its own.
 - Capability grants are currently embedded in each ToolSpec; no protected policy database, runtime revocation service, or multi-user boundary exists.
-- The gateway calls in-process handlers. There is no OS sandbox and no real filesystem, shell, network, browser, or external-service integration.
+- The core gateway still calls in-process handlers and does not automatically route them through a sandbox. A separate Linux BubblewrapSandbox is implemented for explicitly configured process tasks, but live isolation depends on the host's namespace support and Bubblewrap version; its full runtime escape test is opt-in. There is still no production browser, network connector, or external-service integration.
 - Evidence is structured and criterion-scoped, but the code cannot establish that a producer is honest or that a reported external effect is true.
 - Mission audit events can be persisted through SQLite hash chains and append-only triggers; the chain is tamper-evident but not tamper-proof, externally anchored, or encrypted at rest. Read-only public access is an API integrity guard, not a security boundary against malicious code running inside the same Python process.
-- Authentication, authorization persistence, secret store integration, retention/deletion enforcement, and adversarial end-to-end tests remain outstanding.
+- A JWT-backed verifier and trusted approval issuance service exist, but this repository does not provide login/token issuance, automatic JWKS retrieval/rotation, MFA or session revocation, a production multi-user HTTP authorization service, a secret manager, retention/deletion enforcement, or a completed real-host sandbox escape test.
 
 The new checks lower several classes of accidental bypass but do not make this prototype suitable for consequential production use.
 
@@ -136,7 +136,7 @@ Residual risks:
 - A hash chain detects partial/uncoordinated edits, but it is not an external signature and cannot stop a database-level attacker from rewriting the full database and recomputing the chain.
 - File permissions are only one local control; the OS account, backups, WAL files, and parent directory also need protection.
 - A crash after a handler begins can leave an action in started or unknown. The explicit recovery API marks stranded started actions unknown, blocks the mission, and never assumes a retry is safe. A stranded prepared action is classified as failed-before-start because the runner persists started before entering the handler.
-- The store does not create authenticated identities. The application layer must authenticate approvers before inserting an approval record.
+- The store itself does not authenticate identities. The new TrustedApprovalService can issue a stored approval only after JwtPrincipalAuthenticator validates a bearer token against operator-configured keys, fixed issuer/audience, and scopes. A caller that bypasses this service and directly creates Approval records must independently preserve that trusted boundary.
 - Revocation is reloaded before the invocation, but this in-process prototype does not make approval lookup and arbitrary side effects one atomic transaction; it is not a multi-user production authorization service.
 
 
@@ -159,4 +159,21 @@ When a MissionRunner is configured with SQLite persistence, a supplied approval 
 
 The consumption point intentionally precedes handler entry: if the process crashes after consumption but before the effect starts, the approval is still spent and a fresh approval is required. That is a conservative availability trade-off to reduce replay risk.
 
-Residual boundary: this is a prototype-level SQLite control, not a complete multi-user authorization service. It still does not authenticate the person behind `approver_id`; the trusted application boundary must do that. The HMAC key must remain outside the repository and outside model-visible data. A compromised process or database operator can exceed these API-level guarantees.
+Residual boundary: HMAC itself does not authenticate the person behind `approver_id`. The prototype's TrustedApprovalService derives that ID from a JWT subject only after checking an operator-configured public-key allowlist, fixed issuer/audience, signature, time claims, and required scopes. The application must supply real tokens from a trusted identity provider and protect the service boundary; login/token acquisition, remote JWKS rotation, MFA/session revocation, and a production multi-user API are not included. Keep the HMAC key outside the repository and model-visible data. A compromised process or database operator can exceed these API-level guarantees.
+
+## 16. JWT approver authentication
+
+The identity module uses PyJWT with an explicit asymmetric-algorithm allowlist per configured key ID. It rejects unknown key IDs, key/algorithm mismatches, invalid signatures, wrong issuer/audience, missing required claims, malformed subjects/scopes, expired tokens, and tokens whose signed `exp - iat` lifetime exceeds the configured maximum. The approval service requires a global approval scope plus a tool-specific scope, caps approval lifetime, derives the approver identifier from the verified token subject, HMAC-attests the action, and persists it.
+
+This does not fetch or trust keys from token-controlled URLs and deliberately does not implement a login flow. The operator must maintain the trusted key ring, align claim formats and scopes with the identity provider, and protect all token handling. It does not by itself establish MFA, revoke an otherwise valid token early, or prevent another compromised component from asking for approvals through a misconfigured endpoint.
+
+## 17. Bubblewrap process boundary
+
+The optional Linux adapter fails closed if Bubblewrap, required runtime commands, namespaces, mounts, or the launch preflight fail. It never falls back to executing the requested command directly on the host. Its child gets a minimal environment, no network namespace sharing, a read-only runtime/source view, a size-limited private tmpfs copy of the workspace, bounded CPU/address-space/process/file/output limits, and wall-clock timeout. Its task writes are ephemeral and credential-shaped common filenames plus VCS metadata are removed before the task starts.
+
+Residual risks and deployment requirements:
+- The standard pytest suite verifies command construction, fail-closed behavior, timeouts, and argument handling with mocked process launches; a real Bubblewrap kernel test is opt-in and must be run on each supported deployment class.
+- Bubblewrap relies on Linux namespaces and the host kernel. Kernel vulnerabilities, root/host compromise, dangerous workspace contents not matching the exclusion patterns, and same-user races outside this adapter remain out of scope.
+- The task can read non-excluded content in its configured workspace. Do not place credentials or unrelated private files there.
+- Workspace changes are not persistent. Any write-back must pass through a separate authorized adapter and independent verification.
+- The main ToolGateway is still an in-process callback mechanism; registering a callback does not automatically put it inside Bubblewrap.

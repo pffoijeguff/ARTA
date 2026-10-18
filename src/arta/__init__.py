@@ -23,6 +23,8 @@ from .control import CancellationToken, ExecutionCancelled, ExecutionControl, Ex
 from .runner import MissionPlan, MissionRunReport, MissionRunner, PlannedAction
 from .persistence import SQLiteMissionStore, StoreError, StoreIntegrityError
 from .workspace import WorkspaceAdapter, WorkspaceError
+from .identity import AuthenticatedPrincipal, IdentityError, JwtPrincipalAuthenticator, TrustedApprovalService
+from .sandbox import BubblewrapSandbox, SandboxError, SandboxResult
 
 __all__ = [
     "HmacApprovalAuthority",
@@ -49,6 +51,13 @@ __all__ = [
     "ToolSpec",
     "WorkspaceAdapter",
     "WorkspaceError",
+    "AuthenticatedPrincipal",
+    "IdentityError",
+    "JwtPrincipalAuthenticator",
+    "TrustedApprovalService",
+    "BubblewrapSandbox",
+    "SandboxError",
+    "SandboxResult",
     "create_approval_record",
     "fingerprint_action",
     "verify_mission",
