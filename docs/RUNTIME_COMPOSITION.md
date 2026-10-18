@@ -53,3 +53,51 @@ A provider must issue the JWTs, and operators remain responsible for issuer/audi
 network egress policy, key lifecycle monitoring, secret management and deployment tests. Key
 removal becomes visible after the cache expires unless an operator forces a refresh/restarts the
 service. This is a key-discovery adapter, not an identity-provider product or security certification.
+
+
+## Public-client OIDC login with Authorization Code + PKCE
+
+`OidcAuthorizationCodeClient` adds the protocol client primitives for a server-side application
+registered as a public client: it creates a cryptographically random state, nonce and PKCE
+verifier; sends an S256 challenge to a fixed HTTPS authorization endpoint; consumes each pending
+state once; exchanges the code only at a fixed HTTPS token endpoint without redirects; validates
+the ID token through `OidcJwksAuthenticator`; and binds the verified ID token to the original
+nonce. The token response is size-bounded, and refresh tokens are rejected until a protected
+refresh-token lifecycle exists.
+
+The application must register the exact HTTPS redirect URI with its identity provider, configure
+the authorization and token endpoints from trusted provider metadata, and configure the JWKS
+authenticator's issuer and audience to match that provider and client ID. The client intentionally
+does not accept a client secret. It keeps pending transactions in process memory, so production
+deployments with multiple workers need sticky routing or a shared, protected, TTL-bound transaction
+store. It is not an HTTP callback server, browser session manager, MFA system, logout/revocation
+service, or full product login UI. The host app must validate its own browser session/cookie policy
+and must not log access tokens or callback codes.
+
+Example:
+
+```python
+from arta import OidcAuthorizationCodeClient, OidcJwksAuthenticator
+
+verifier = OidcJwksAuthenticator(
+    jwks_url="https://identity.example.com/.well-known/jwks.json",
+    issuer="https://identity.example.com/",
+    audience="arta-web",  # must match the registered OIDC client ID
+)
+login = OidcAuthorizationCodeClient(
+    authorization_endpoint="https://identity.example.com/authorize",
+    token_endpoint="https://identity.example.com/token",
+    client_id="arta-web",
+    redirect_uri="https://app.example.com/oidc/callback",
+    authenticator=verifier,
+)
+start = login.begin_login()
+# Redirect the browser to start.authorization_url.
+# In the registered callback, pass the received code and state to:
+result = login.complete_login(code=callback_code, state=callback_state)
+# Only after success should the host app establish its own protected session.
+```
+
+No live identity-provider credentials are included in the repository; provider registration,
+MFA policy, production callback hosting, browser cookie controls, and deployment testing remain
+operator/application responsibilities.
