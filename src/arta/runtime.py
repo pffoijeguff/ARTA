@@ -5,7 +5,7 @@ from typing import Any
 from .approvals import HmacApprovalAuthority
 from .control import CancellationToken
 from .core import Approval, AuthorityKernel, Mission, MissionError, ToolGateway
-from .identity import JwtPrincipalAuthenticator, TrustedApprovalService
+from .identity import PrincipalAuthenticator, TrustedApprovalService
 from .persistence import SQLiteMissionStore
 from .runner import ActionVerifier, MissionPlan, MissionRunReport, MissionRunner
 from .sandbox import BubblewrapSandbox
@@ -17,14 +17,14 @@ class SecureRuntime:
     Token issuance/key rotation remain the responsibility of a trusted identity provider.
     This runtime has one command tool and refuses plans that contain any other tool.
     """
-    def __init__(self, *, authenticator: JwtPrincipalAuthenticator,
+    def __init__(self, *, authenticator: PrincipalAuthenticator,
                  approval_authority: HmacApprovalAuthority, store: SQLiteMissionStore,
                  sandbox: BubblewrapSandbox,
                  required_scopes_by_tool: Mapping[str, Sequence[str]],
                  tool_name: str = "sandbox.run",
                  max_approval_lifetime_seconds: int = 300) -> None:
-        if not isinstance(authenticator, JwtPrincipalAuthenticator):
-            raise MissionError("SecureRuntime requires a configured JWT authenticator.")
+        if not isinstance(authenticator, PrincipalAuthenticator):
+            raise MissionError("SecureRuntime requires a compatible verified-principal authenticator.")
         if not isinstance(approval_authority, HmacApprovalAuthority):
             raise MissionError("SecureRuntime requires a trusted HMAC approval authority.")
         if not isinstance(store, SQLiteMissionStore):
