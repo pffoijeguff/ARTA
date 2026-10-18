@@ -181,3 +181,27 @@ def test_unauthenticated_session_and_method_restrictions(tmp_path):
     assert invoke(app, "/session")[0] == "401 Unauthorized"
     assert invoke(app, "/logout", method="GET")[0] == "405 Method Not Allowed"
     assert invoke(app, "/login", method="POST")[0] == "405 Method Not Allowed"
+
+
+
+def test_persian_home_page_renders_login_and_escapes_authenticated_subject(tmp_path):
+    store = SQLiteOidcSessionStore(tmp_path / "sessions.sqlite3", b"\x71" * 32)
+    app = OidcWebApplication(
+        login_client=FakeLogin(),
+        session_store=store,
+        public_origin="https://app.example.test",
+        callback_path="/oidc/callback",
+    )
+    status, headers, body = invoke(app, "/")
+    assert status == "200 OK"
+    assert "text/html; charset=utf-8" in header_values(headers, "Content-Type")[0]
+    assert 'lang="fa" dir="rtl"' in body.decode()
+    assert "/login" in body.decode()
+
+    session = store.create_session('<img src=x onerror="alert(1)">')
+    status, _, body = invoke(app, "/", cookie=f"arta_session={session.token}")
+    page = body.decode()
+    assert status == "200 OK"
+    assert "&lt;img" in page
+    assert '<img src=x' not in page
+    assert "/logout" in page
