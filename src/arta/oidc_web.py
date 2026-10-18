@@ -19,8 +19,9 @@ from .oidc_sessions import OidcSessionStoreError, SQLiteOidcSessionStore
 class OidcWebApplication:
     """WSGI routes for login, OIDC callback, current session, and logout.
 
-    The app does not serve HTML or manage provider-side logout/MFA. It creates a local session only
-    from a successfully verified OIDC principal. Cookies are host-only (no Domain attribute).
+    The app serves a minimal Persian RTL home page and manages local HTTP sessions, but does not
+    manage provider-side logout/MFA. It creates a local session only from a verified OIDC principal.
+    Cookies are host-only (no Domain attribute).
     """
 
     SESSION_COOKIE = "arta_session"
@@ -48,8 +49,15 @@ class OidcWebApplication:
             or parsed_origin.password is not None
         ):
             raise ValueError("public_origin must be an HTTPS origin without a path")
-        if not isinstance(callback_path, str) or not callback_path.startswith("/") or callback_path.startswith("//") or "?" in callback_path or "#" in callback_path:
-            raise ValueError("callback_path must be an absolute local path without query or fragment")
+        if (
+            not isinstance(callback_path, str)
+            or not callback_path.startswith("/")
+            or callback_path.startswith("//")
+            or callback_path in {"/", "/login", "/session", "/logout"}
+            or "?" in callback_path
+            or "#" in callback_path
+        ):
+            raise ValueError("callback_path must be a dedicated local path without query or fragment")
         if not isinstance(after_login_path, str) or not after_login_path.startswith("/") or after_login_path.startswith("//") or "?" in after_login_path or "#" in after_login_path:
             raise ValueError("after_login_path must be an absolute local path without query or fragment")
         if isinstance(session_ttl_seconds, bool) or not isinstance(session_ttl_seconds, int) or not 60 <= session_ttl_seconds <= 30 * 24 * 60 * 60:

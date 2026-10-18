@@ -205,3 +205,15 @@ def test_persian_home_page_renders_login_and_escapes_authenticated_subject(tmp_p
     assert "&lt;img" in page
     assert '<img src=x' not in page
     assert "/logout" in page
+
+
+
+@pytest.mark.parametrize("callback_path", ["/", "/login", "/session", "/logout", "//attacker.example", "/callback?x=1"])
+def test_web_adapter_rejects_callback_route_collisions_and_unsafe_paths(tmp_path, callback_path):
+    with pytest.raises(ValueError, match="callback_path"):
+        OidcWebApplication(
+            login_client=FakeLogin(),
+            session_store=SQLiteOidcSessionStore(tmp_path / "sessions.sqlite3", b"\x72" * 32),
+            public_origin="https://app.example.test",
+            callback_path=callback_path,
+        )
