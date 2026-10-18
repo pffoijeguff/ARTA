@@ -355,8 +355,16 @@ class AuthorityKernel:
             return PolicyDecision(PolicyEffect.DENY, "Approval record is invalid.", action_hash)
         if approval.status is not ApprovalStatus.APPROVED:
             return PolicyDecision(PolicyEffect.DENY, "Approval is denied or revoked.", action_hash)
-        if not approval.approval_id.strip() or not approval.approver_id.strip():
-            return PolicyDecision(PolicyEffect.DENY, "Approval metadata is incomplete.", action_hash)
+        if (
+            not isinstance(approval.approval_id, str)
+            or not approval.approval_id.strip()
+            or not isinstance(approval.approver_id, str)
+            or not approval.approver_id.strip()
+            or not isinstance(approval.action_fingerprint, str)
+            or len(approval.action_fingerprint) != 64
+            or any(character not in "0123456789abcdef" for character in approval.action_fingerprint)
+        ):
+            return PolicyDecision(PolicyEffect.DENY, "Approval metadata is incomplete or malformed.", action_hash)
         if not hmac.compare_digest(approval.action_fingerprint, action_hash):
             return PolicyDecision(PolicyEffect.DENY, "Approval does not match the requested action.", action_hash)
         try:

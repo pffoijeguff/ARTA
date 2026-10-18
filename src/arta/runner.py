@@ -107,7 +107,6 @@ class MissionRunner:
         mission: Mission,
         plan: MissionPlan,
         verifier: ActionVerifier,
-        *,
     ) -> MissionRunReport:
         if mission.state not in {
             MissionState.CREATED,
