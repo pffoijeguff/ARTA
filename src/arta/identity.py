@@ -10,7 +10,7 @@ import math
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from types import MappingProxyType
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Callable, Mapping, Protocol, Sequence, runtime_checkable
 
 try:
     import jwt
@@ -32,6 +32,14 @@ _SUPPORTED_ASYMMETRIC_ALGORITHMS = frozenset({
     "ES256", "ES384", "ES512",
     "EdDSA",
 })
+
+
+@runtime_checkable
+class PrincipalAuthenticator(Protocol):
+    """Structural contract shared by fixed-key and OIDC/JWKS authenticators."""
+
+    def authenticate(self, bearer_token: str) -> "AuthenticatedPrincipal":
+        """Return verified identity claims or raise IdentityError."""
 
 
 @dataclass(frozen=True)
@@ -200,15 +208,15 @@ class TrustedApprovalService:
     def __init__(
         self,
         *,
-        authenticator: JwtPrincipalAuthenticator,
+        authenticator: PrincipalAuthenticator,
         authority: HmacApprovalAuthority,
         store: SQLiteMissionStore,
         required_scopes_by_tool: Mapping[str, Sequence[str]],
         max_approval_lifetime_seconds: int = 300,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
-        if not isinstance(authenticator, JwtPrincipalAuthenticator):
-            raise IdentityError("A JWT principal authenticator is required.")
+        if not isinstance(authenticator, PrincipalAuthenticator):
+            raise IdentityError("A compatible verified-principal authenticator is required.")
         if not isinstance(authority, HmacApprovalAuthority):
             raise IdentityError("A trusted HMAC approval authority is required.")
         if not isinstance(store, SQLiteMissionStore):

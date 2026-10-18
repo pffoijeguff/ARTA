@@ -71,6 +71,7 @@ This repository is not yet a security-certified product. A dedicated real-host B
 - [Architecture](docs/ARCHITECTURE.md) — components, contracts, mission state machine, and data flow.
 - [Security Model](docs/SECURITY_MODEL.md) — trust boundaries, permissions, threat scenarios, and required controls.
 - [Secure Runtime Composition](docs/RUNTIME_COMPOSITION.md) — trusted identity, approval, sandbox, and mission-runner wiring.
+- OIDC identity support includes fixed-endpoint JWKS verification/key rotation and Authorization Code + PKCE client primitives; see [runtime composition](docs/RUNTIME_COMPOSITION.md) for setup and deployment boundaries.
 - [Tool Execution Contract](docs/TOOL_EXECUTION_CONTRACT.md) — trust classes, required adapter contracts, and failure semantics.
 - [Acceptance Tests](docs/ACCEPTANCE_TESTS.md) — observable conditions that future implementation must satisfy.
 - [Roadmap](docs/ROADMAP.md) — staged delivery with explicit exit criteria.

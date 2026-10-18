@@ -5,6 +5,7 @@ This module verifies identity tokens only; it does not implement an interactive 
 """
 from __future__ import annotations
 
+import hmac
 import json
 import threading
 import time
@@ -179,7 +180,7 @@ class OidcJwksAuthenticator:
             self._cache = _KeySet(keys, time.monotonic() + self._cache_ttl)
             return keys
 
-    def authenticate(self, bearer_token: str) -> AuthenticatedPrincipal:
+    def authenticate(self, bearer_token: str, *, expected_nonce: str | None = None) -> AuthenticatedPrincipal:
         if not isinstance(bearer_token, str) or not bearer_token.strip():
             raise IdentityError("A bearer token is required.")
         token = bearer_token.strip()
@@ -208,4 +209,25 @@ class OidcJwksAuthenticator:
             max_token_lifetime_seconds=self._max_lifetime,
             leeway_seconds=self._leeway,
         )
-        return verifier.authenticate(token)
+        principal = verifier.authenticate(token)
+        if expected_nonce is not None:
+            if not isinstance(expected_nonce, str) or not 16 <= len(expected_nonce) <= 512:
+                raise IdentityError("Expected OIDC nonce is invalid.")
+            try:
+                claims = jwt.decode(
+                    token,
+                    key=configured[1],
+                    algorithms=[alg],
+                    issuer=self._issuer,
+                    audience=self._audience,
+                    options={"require": ["nonce", "exp", "iat", "iss", "aud", "sub"]},
+                )
+            except Exception:
+                raise IdentityError("OIDC ID token failed nonce-bound validation.") from None
+            actual_nonce = claims.get("nonce")
+            if not isinstance(actual_nonce, str) or not hmac.compare_digest(actual_nonce, expected_nonce):
+                raise IdentityError("OIDC ID token nonce does not match the login transaction.")
+            audiences = claims.get("aud")
+            if isinstance(audiences, list) and len(audiences) > 1 and claims.get("azp") != self._audience:
+                raise IdentityError("OIDC ID token authorized party is invalid.")
+        return principal
