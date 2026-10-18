@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from arta.core import (
+    MAX_TOOL_INVOCATIONS_PER_MISSION,
     Approval,
     ApprovalStatus,
     AuthorityKernel,
@@ -375,6 +376,28 @@ def test_tool_spec_copies_capability_allowlists_and_rejects_mutable_contract_cha
 
     with pytest.raises(MissionError, match="sequence"):
         ToolSpec("bad-contract", lambda args: {"ok": True}, allowed_arguments="path")
+
+
+def test_gateway_enforces_a_per_mission_tool_invocation_budget() -> None:
+    item = mission("report-created")
+    calls = 0
+
+    def handler(_args):
+        nonlocal calls
+        calls += 1
+        return {"ok": True}
+
+    gateway = ToolGateway(AuthorityKernel(clock=lambda: NOW))
+    gateway.register(ToolSpec("bounded.read", handler))
+    for _ in range(MAX_TOOL_INVOCATIONS_PER_MISSION):
+        assert gateway.invoke(item, "bounded.read").success
+
+    with pytest.raises(MissionError, match="invocation budget"):
+        gateway.invoke(item, "bounded.read")
+
+    assert calls == MAX_TOOL_INVOCATIONS_PER_MISSION
+    assert item.state is MissionState.BLOCKED
+    assert any(event.event_type == "mission.action_budget_exhausted" for event in item.audit)
 
 
 def test_audit_timeline_and_nested_details_are_read_only() -> None:
