@@ -106,14 +106,14 @@ Do not call a build production-ready until applicable security acceptance tests 
 
 ## 10. Implemented controls versus residual risks
 
-The current in-memory Python slice implements exact tool argument allowlists, optional target allowlists, strict JSON-compatible argument/output validation, action-bound SHA-256 approval fingerprints, approval status and expiry checks, and explicit evidence outcomes. Its tests cover altered action arguments, wrong targets, expired/future/revoked approvals, non-JSON inputs, verification gaps, and conflicting/latest evidence.
+The executable Python mission-kernel slice (with optional SQLite persistence) implements exact tool argument allowlists, optional target allowlists, immutable copies of tool capability contracts, strict JSON-compatible argument/output validation, action-bound SHA-256 approval fingerprints, approval status and expiry checks, and explicit evidence outcomes. The public mission audit timeline is returned as a read-only tuple, and event details are recursively frozen against ordinary API-level mutation. The gateway snapshots arguments once and uses that same snapshot for policy evaluation and handler invocation. Direct calls that need approval transition into AWAITING_APPROVAL and emit request/consumption events; an approval record cannot be consumed twice within one mission. Tests cover these invariants alongside altered action arguments, wrong targets, expired/future/revoked approvals, non-JSON inputs, verification gaps, and conflicting/latest evidence.
 
 Important residual risks:
 - The caller constructing an Approval record must authenticate the approver; the object is not a signature and cannot establish identity on its own.
 - Capability grants are currently embedded in each ToolSpec; no protected policy database, runtime revocation service, or multi-user boundary exists.
 - The gateway calls in-process handlers. There is no OS sandbox and no real filesystem, shell, network, browser, or external-service integration.
 - Evidence is structured and criterion-scoped, but the code cannot establish that a producer is honest or that a reported external effect is true.
-- Mission audit events can be persisted through SQLite hash chains and append-only triggers; the chain is tamper-evident but not tamper-proof, externally anchored, or encrypted at rest.
+- Mission audit events can be persisted through SQLite hash chains and append-only triggers; the chain is tamper-evident but not tamper-proof, externally anchored, or encrypted at rest. Read-only public access is an API integrity guard, not a security boundary against malicious code running inside the same Python process.
 - Authentication, authorization persistence, secret store integration, retention/deletion enforcement, and adversarial end-to-end tests remain outstanding.
 
 The new checks lower several classes of accidental bypass but do not make this prototype suitable for consequential production use.
